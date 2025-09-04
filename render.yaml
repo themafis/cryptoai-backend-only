@@ -9,7 +9,7 @@ services:
     buildCommand: |
       python3.11 --version || python3 --version || python --version
       pip install --upgrade pip setuptools wheel
-      pip install -r requirements.txt
+      pip install --only-binary=all --no-cache-dir -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
@@ -18,6 +18,8 @@ services:
         value: "1"
       - key: PIP_DISABLE_PIP_VERSION_CHECK
         value: "1"
+      - key: PIP_ONLY_BINARY
+        value: ":all:"
       - key: UVICORN_WORKERS
         value: "1"
       - key: UVICORN_LOG_LEVEL
