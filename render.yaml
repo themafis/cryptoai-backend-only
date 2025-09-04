@@ -8,8 +8,9 @@ services:
     healthCheckPath: /
     buildCommand: |
       python3.11 --version || python3 --version || python --version
-      pip install --upgrade pip setuptools wheel
-      pip install --only-binary=all --no-cache-dir -r requirements.txt
+      pip install --upgrade pip --no-cache-dir --retries 3 --timeout 60
+      pip cache purge || true
+      pip install --only-binary=all --no-cache-dir --retries 3 --timeout 60 -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
@@ -20,6 +21,10 @@ services:
         value: "1"
       - key: PIP_ONLY_BINARY
         value: ":all:"
+      - key: PIP_RETRIES
+        value: "3"
+      - key: PIP_TIMEOUT
+        value: "60"
       - key: UVICORN_WORKERS
         value: "1"
       - key: UVICORN_LOG_LEVEL
