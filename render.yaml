@@ -7,12 +7,13 @@ services:
     autoDeploy: true
     healthCheckPath: /
     buildCommand: |
+      python --version
       pip install --upgrade pip
-      pip uninstall -y numpy || true
-      pip install --no-cache-dir numpy==1.26.4 pandas==1.5.3
       pip install --no-cache-dir -r requirements.txt
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: PIP_DISABLE_PIP_VERSION_CHECK
