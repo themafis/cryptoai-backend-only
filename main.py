@@ -1113,19 +1113,16 @@ if __name__ == "__main__":
 # NEWS_CACHE = {"data": None, "ts": None, "params": None}  # DISABLED
 
 @app.get("/news")
-def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, region: str = "", max_age_days: int = 7):
-    print(f"🔍 [NEWS DEBUG] Request: currencies={currencies}, filter={filter}, limit={limit}, region={region}")
+def get_news(symbol: str = "BTC", max_age_days: int = 7):
+    print(f"🔍 [NEWS DEBUG] Request: symbol={symbol}, max_age_days={max_age_days}")
     try:
-        # Cache completely disabled
-        print(f"🔍 [NEWS DEBUG] Cache completely disabled") 
-
         # NewsAPI.org kullan
         newsapi_token = "209b2715e9544c65b2b9dc294fd225e0"
         base = "https://newsapi.org/v2/everything"
         
         # Coin-specific haber ara
         query = {
-            "q": f"{currencies} cryptocurrency",
+            "q": f"{symbol} cryptocurrency",
             "language": "tr",
             "sortBy": "publishedAt",
             "pageSize": 10,
@@ -1142,9 +1139,9 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         items = data.get("articles", [])
         print(f"🔍 [NEWS DEBUG] Found {len(items)} items (first try)")
 
-        # Basit sistem: Coin-specific haber varsa göster, yoksa genel haber göster
+        # Eğer coin-specific haber yoksa, genel haber ara
         if len(items) == 0:
-            print(f"🔍 [NEWS DEBUG] No coin-specific news for {currencies}, trying general news...")
+            print(f"🔍 [NEWS DEBUG] No coin-specific news for {symbol}, trying general news...")
             general_query = {
                 "q": "bitcoin ethereum cryptocurrency",
                 "language": "tr",
@@ -1160,6 +1157,7 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
             items = data_general.get("articles", [])
             print(f"🔍 [NEWS DEBUG] Found {len(items)} general items")
 
+        # Haberleri formatla
         simplified = []
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
         for it in items:
@@ -1187,15 +1185,13 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
                 "votes": {},
                 "currencies": []
             })
-            if len(simplified) >= limit:
+            if len(simplified) >= 10:
                 break
 
         response = {"items": simplified}
         print(f"🔍 [NEWS DEBUG] Final response: {len(simplified)} items")
         
-        # Cache completely disabled
-        print(f"🔍 [NEWS DEBUG] Cache completely disabled")
-        
         return JSONResponse(content=response)
     except Exception as e:
+        print(f"❌ [NEWS DEBUG] Error: {e}")
         return JSONResponse(content={"items": [], "error": str(e)}, status_code=200)
