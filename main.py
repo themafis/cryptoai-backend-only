@@ -1112,8 +1112,8 @@ if __name__ == "__main__":
 
 # NEWS_CACHE = {"data": None, "ts": None, "params": None}  # DISABLED
 
-@app.get("/news")
-def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, region: str = "", max_age_days: int = 7):
+@app.get("/news-new")
+def get_news_new(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, region: str = "", max_age_days: int = 7):
     print(f"🔍 [NEWS DEBUG] Request: currencies={currencies}, filter={filter}, limit={limit}, region={region}")
     try:
         # Cache completely disabled
