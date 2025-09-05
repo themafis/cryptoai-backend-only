@@ -1195,9 +1195,9 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         response = {"items": simplified}
         print(f"🔍 [NEWS DEBUG] Final response: {len(simplified)} items")
         
-        NEWS_CACHE["data"] = response
-        NEWS_CACHE["ts"] = now
-        NEWS_CACHE["params"] = params_signature
+        # Cache disabled for debugging
+        print(f"🔍 [NEWS DEBUG] Cache disabled for debugging")
+        
         return JSONResponse(content=response)
     except Exception as e:
         return JSONResponse(content={"items": [], "error": str(e)}, status_code=200)
