@@ -1127,7 +1127,7 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
             return JSONResponse(content=NEWS_CACHE["data"]) 
 
         token = os.getenv("CRYPTOPANIC_TOKEN", "")
-        base = "https://cryptopanic.com/api/v1/posts/"
+        base = "https://cryptopanic.com/api/developer/v2/posts/"
         query = {
             "filter": filter,
             "kind": "news",
