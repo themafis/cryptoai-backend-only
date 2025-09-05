@@ -1126,7 +1126,12 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
             and now - NEWS_CACHE["ts"] < 120
         ):
             print(f"🔍 [NEWS DEBUG] Returning cached data for {currencies}")
-            return JSONResponse(content=NEWS_CACHE["data"]) 
+            return JSONResponse(content=NEWS_CACHE["data"])
+        
+        # Clear cache for debugging
+        NEWS_CACHE["data"] = None
+        NEWS_CACHE["params"] = None
+        NEWS_CACHE["ts"] = None 
 
         token = os.getenv("CRYPTOPANIC_TOKEN", "")
         base = "https://cryptopanic.com/api/developer/v2/posts/"
@@ -1153,6 +1158,7 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
 
         # Basit sistem: Coin-specific haber varsa göster, yoksa genel haber göster
         if len(items) == 0:
+            print(f"🔍 [NEWS DEBUG] No coin-specific news for {currencies}, trying general news...")
             print("🔁 [NEWS DEBUG] No coin-specific news, trying general news...")
             general_query = {
                 "filter": "hot",
