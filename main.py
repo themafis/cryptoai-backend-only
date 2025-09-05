@@ -1107,16 +1107,14 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 # =====================
-# NEWS ENDPOINT (CryptoPanic)
+# NEWS ENDPOINT (NewsAPI.org)
 # =====================
-
-# NEWS_CACHE = {"data": None, "ts": None, "params": None}  # DISABLED
 
 @app.get("/news")
 def get_news(symbol: str = "BTC", max_age_days: int = 7):
-    print(f"🔍 [NEWS DEBUG] Request: symbol={symbol}, max_age_days={max_age_days}")
+    print(f"🔍 [NEWS] Request: symbol={symbol}, max_age_days={max_age_days}")
     try:
-        # NewsAPI.org kullan
+        # NewsAPI.org
         newsapi_token = "209b2715e9544c65b2b9dc294fd225e0"
         base = "https://newsapi.org/v2/everything"
         
@@ -1129,19 +1127,17 @@ def get_news(symbol: str = "BTC", max_age_days: int = 7):
             "apiKey": newsapi_token
         }
         
-        print(f"🔍 [NEWS DEBUG] Making request to: {base}")
-        print(f"🔍 [NEWS DEBUG] Query params: {query}")
-        
+        print(f"🔍 [NEWS] Searching for: {symbol}")
         r = requests.get(base, params=query, timeout=10)
-        print(f"🔍 [NEWS DEBUG] Response status: {r.status_code}")
+        print(f"🔍 [NEWS] Status: {r.status_code}")
+        
         data = r.json()
-        print(f"🔍 [NEWS DEBUG] Response data: {data}")
         items = data.get("articles", [])
-        print(f"🔍 [NEWS DEBUG] Found {len(items)} items (first try)")
+        print(f"🔍 [NEWS] Found {len(items)} items for {symbol}")
 
         # Eğer coin-specific haber yoksa, genel haber ara
         if len(items) == 0:
-            print(f"🔍 [NEWS DEBUG] No coin-specific news for {symbol}, trying general news...")
+            print(f"🔍 [NEWS] No news for {symbol}, trying general crypto news...")
             general_query = {
                 "q": "bitcoin ethereum cryptocurrency",
                 "language": "tr",
@@ -1151,47 +1147,48 @@ def get_news(symbol: str = "BTC", max_age_days: int = 7):
             }
             
             r_general = requests.get(base, params=general_query, timeout=10)
-            print(f"🔍 [NEWS DEBUG] General news status: {r_general.status_code}")
             data_general = r_general.json()
-            print(f"🔍 [NEWS DEBUG] General news data: {data_general}")
             items = data_general.get("articles", [])
-            print(f"🔍 [NEWS DEBUG] Found {len(items)} general items")
+            print(f"🔍 [NEWS] Found {len(items)} general items")
 
         # Haberleri formatla
         simplified = []
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
-        for it in items:
-            created_at = it.get("publishedAt")
+        
+        for article in items:
+            published_at = article.get("publishedAt")
             include = True
-            try:
-                if created_at:
-                    # Handle Z suffix
-                    ts = datetime.fromisoformat(created_at.replace("Z", "+00:00").replace("+00:00", "+00:00"))
-                    # Convert to naive UTC for comparison
+            
+            # Tarih kontrolü
+            if published_at:
+                try:
+                    ts = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
                     ts_naive = ts.replace(tzinfo=None)
                     include = ts_naive >= cutoff
-            except Exception:
-                include = True
+                except:
+                    include = True
+            
             if not include:
                 continue
+                
             simplified.append({
-                "id": it.get("url", "").split("/")[-1] if it.get("url") else "",
-                "title": it.get("title"),
-                "url": it.get("url"),
-                "source": it.get("source", {}).get("name") if isinstance(it.get("source"), dict) else None,
-                "description": it.get("description"),
-                "created_at": it.get("publishedAt"),
+                "id": article.get("url", "").split("/")[-1] if article.get("url") else "",
+                "title": article.get("title"),
+                "url": article.get("url"),
+                "source": article.get("source", {}).get("name") if isinstance(article.get("source"), dict) else None,
+                "description": article.get("description"),
+                "created_at": article.get("publishedAt"),
                 "kind": "news",
                 "votes": {},
                 "currencies": []
             })
+            
             if len(simplified) >= 10:
                 break
 
-        response = {"items": simplified}
-        print(f"🔍 [NEWS DEBUG] Final response: {len(simplified)} items")
+        print(f"🔍 [NEWS] Returning {len(simplified)} items")
+        return JSONResponse(content={"items": simplified})
         
-        return JSONResponse(content=response)
     except Exception as e:
-        print(f"❌ [NEWS DEBUG] Error: {e}")
+        print(f"❌ [NEWS] Error: {e}")
         return JSONResponse(content={"items": [], "error": str(e)}, status_code=200)
