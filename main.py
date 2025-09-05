@@ -1119,19 +1119,20 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         # Cache disabled for debugging
         print(f"🔍 [NEWS DEBUG] Cache disabled for debugging") 
 
-        token = os.getenv("CRYPTOPANIC_TOKEN", "")
-        base = "https://cryptopanic.com/api/developer/v2/posts/"
+        # NewsAPI.org kullan
+        newsapi_token = "209b2715e9544c65b2b9dc294fd225e0"
+        base = "https://newsapi.org/v2/everything"
+        
+        # Coin-specific haber ara
         query = {
-            "filter": filter,
-            "kind": "news",
-            "currencies": currencies,
-            "public": "true",
+            "q": f"{currencies} cryptocurrency",
+            "language": "tr",
+            "country": "tr",
+            "sortBy": "publishedAt",
+            "pageSize": 10,
+            "apiKey": newsapi_token
         }
-        if region:
-            query["regions"] = region
-        if token:
-            query["auth_token"] = token
-
+        
         print(f"🔍 [NEWS DEBUG] Making request to: {base}")
         print(f"🔍 [NEWS DEBUG] Query params: {query}")
         
@@ -1139,33 +1140,32 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         print(f"🔍 [NEWS DEBUG] Response status: {r.status_code}")
         data = r.json()
         print(f"🔍 [NEWS DEBUG] Response data: {data}")
-        items = data.get("results", [])
+        items = data.get("articles", [])
         print(f"🔍 [NEWS DEBUG] Found {len(items)} items (first try)")
 
         # Basit sistem: Coin-specific haber varsa göster, yoksa genel haber göster
         if len(items) == 0:
             print(f"🔍 [NEWS DEBUG] No coin-specific news for {currencies}, trying general news...")
-            print("🔁 [NEWS DEBUG] No coin-specific news, trying general news...")
             general_query = {
-                "filter": "hot",
-                "kind": "news",
-                "currencies": "BTC,ETH",
-                "public": "true"
+                "q": "bitcoin ethereum cryptocurrency",
+                "language": "tr",
+                "country": "tr",
+                "sortBy": "publishedAt",
+                "pageSize": 10,
+                "apiKey": newsapi_token
             }
-            if token:
-                general_query["auth_token"] = token
-                
+            
             r_general = requests.get(base, params=general_query, timeout=10)
             print(f"🔍 [NEWS DEBUG] General news status: {r_general.status_code}")
             data_general = r_general.json()
             print(f"🔍 [NEWS DEBUG] General news data: {data_general}")
-            items = data_general.get("results", [])
+            items = data_general.get("articles", [])
             print(f"🔍 [NEWS DEBUG] Found {len(items)} general items")
 
         simplified = []
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
         for it in items:
-            created_at = it.get("created_at")
+            created_at = it.get("publishedAt")
             include = True
             try:
                 if created_at:
@@ -1179,15 +1179,15 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
             if not include:
                 continue
             simplified.append({
-                "id": it.get("id"),
+                "id": it.get("url", "").split("/")[-1] if it.get("url") else "",
                 "title": it.get("title"),
-                "url": it.get("url") or (it.get("source", {}) or {}).get("url"),
-                "source": ((it.get("source", {}) or {}).get("title")) if isinstance(it.get("source"), dict) else None,
+                "url": it.get("url"),
+                "source": it.get("source", {}).get("name") if isinstance(it.get("source"), dict) else None,
                 "description": it.get("description"),
-                "created_at": it.get("created_at"),
-                "kind": it.get("kind"),
-                "votes": (it.get("votes") or {}),
-                "currencies": [c.get("code") for c in (it.get("currencies") or []) if isinstance(c, dict)]
+                "created_at": it.get("publishedAt"),
+                "kind": "news",
+                "votes": {},
+                "currencies": []
             })
             if len(simplified) >= limit:
                 break
