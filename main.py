@@ -1145,12 +1145,35 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         
         r = requests.get(base, params=query, timeout=10)
         print(f"🔍 [NEWS DEBUG] Response status: {r.status_code}")
-        
         data = r.json()
         print(f"🔍 [NEWS DEBUG] Response data: {data}")
-        
         items = data.get("results", [])
-        print(f"🔍 [NEWS DEBUG] Found {len(items)} items")
+        print(f"🔍 [NEWS DEBUG] Found {len(items)} items (first try)")
+
+        # Fallback 1: If region was provided and no items, try without region
+        if not items and region:
+            print("🔁 [NEWS DEBUG] Retrying without region filter...")
+            retry_query = {k: v for k, v in query.items() if k != "regions"}
+            r2 = requests.get(base, params=retry_query, timeout=10)
+            print(f"🔍 [NEWS DEBUG] Retry status: {r2.status_code}")
+            data2 = r2.json()
+            print(f"🔍 [NEWS DEBUG] Retry data: {data2}")
+            items = data2.get("results", [])
+            print(f"🔍 [NEWS DEBUG] Found {len(items)} items (no region)")
+
+        # Fallback 2: If still empty and currencies specified, try generic BTC,ETH
+        if not items and currencies:
+            print("🔁 [NEWS DEBUG] Retrying with generic currencies BTC,ETH...")
+            retry_query2 = {k: v for k, v in query.items() if k != "currencies"}
+            retry_query2["currencies"] = "BTC,ETH"
+            # also ensure no region blocks
+            retry_query2.pop("regions", None)
+            r3 = requests.get(base, params=retry_query2, timeout=10)
+            print(f"🔍 [NEWS DEBUG] Retry2 status: {r3.status_code}")
+            data3 = r3.json()
+            print(f"🔍 [NEWS DEBUG] Retry2 data: {data3}")
+            items = data3.get("results", [])
+            print(f"🔍 [NEWS DEBUG] Found {len(items)} items (generic)")
 
         simplified = []
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
