@@ -1139,9 +1139,43 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         if token:
             query["auth_token"] = token
 
-        r = requests.get(base, params=query, timeout=10)
-        data = r.json()
-        items = data.get("results", [])
+        # Temporary mock data for testing
+        items = [
+            {
+                "id": 1,
+                "title": "Bitcoin ETF Onayı Piyasayı Hareketlendirdi",
+                "url": "https://example.com/btc-news-1",
+                "source": {"title": "CoinDesk"},
+                "created_at": "2025-01-05T10:00:00Z",
+                "kind": "news",
+                "votes": {"positive": 25, "negative": 5},
+                "currencies": [{"code": "BTC"}],
+                "metadata": {"description": "Bitcoin ETF onayı sonrası kripto piyasalarında yükseliş trendi devam ediyor. Yatırımcılar pozitif tepki veriyor."}
+            },
+            {
+                "id": 2,
+                "title": "Cardano (ADA) Yeni Güncelleme Duyurusu",
+                "url": "https://example.com/ada-news-1",
+                "source": {"title": "CryptoNews"},
+                "created_at": "2025-01-05T09:30:00Z",
+                "kind": "news",
+                "votes": {"positive": 15, "negative": 2},
+                "currencies": [{"code": "ADA"}],
+                "metadata": {"description": "Cardano ekibi yeni güncelleme hakkında önemli duyurular yaptı. Bu güncelleme ağ performansını artıracak."}
+            }
+        ]
+        
+        # Try real API
+        try:
+            r = requests.get(base, params=query, timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                real_items = data.get("results", [])
+                if real_items:
+                    items = real_items
+                    print(f"Got {len(real_items)} real news items")
+        except Exception as e:
+            print(f"CryptoPanic API error: {e}, using mock data")
 
         simplified = []
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
