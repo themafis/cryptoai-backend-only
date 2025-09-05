@@ -2,6 +2,8 @@ import requests
 import pandas as pd
 import pandas_ta as ta
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+import os
 import math
 import ccxt
 import numpy as np
@@ -1103,3 +1105,77 @@ def clean_json(obj):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+# =====================
+# NEWS ENDPOINT (CryptoPanic)
+# =====================
+
+NEWS_CACHE = {"data": None, "ts": None, "params": None}
+
+@app.get("/news")
+def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, region: str = "", max_age_days: int = 7):
+    try:
+        # Simple 120s cache per param-set
+        now = int(datetime.utcnow().timestamp())
+        params_signature = f"{currencies}|{filter}|{limit}|{region}"
+        if (
+            NEWS_CACHE["data"] is not None
+            and NEWS_CACHE["params"] == params_signature
+            and NEWS_CACHE["ts"] is not None
+            and now - NEWS_CACHE["ts"] < 120
+        ):
+            return JSONResponse(content=NEWS_CACHE["data"]) 
+
+        token = os.getenv("CRYPTOPANIC_TOKEN", "")
+        base = "https://cryptopanic.com/api/v1/posts/"
+        query = {
+            "filter": filter,
+            "kind": "news",
+            "currencies": currencies,
+            "public": "true",
+        }
+        if region:
+            query["regions"] = region
+        if token:
+            query["auth_token"] = token
+
+        r = requests.get(base, params=query, timeout=10)
+        data = r.json()
+        items = data.get("results", [])
+
+        simplified = []
+        cutoff = datetime.utcnow() - timedelta(days=max_age_days)
+        for it in items:
+            created_at = it.get("created_at")
+            include = True
+            try:
+                if created_at:
+                    # Handle Z suffix
+                    ts = datetime.fromisoformat(created_at.replace("Z", "+00:00").replace("+00:00", "+00:00"))
+                    # Convert to naive UTC for comparison
+                    ts_naive = ts.replace(tzinfo=None)
+                    include = ts_naive >= cutoff
+            except Exception:
+                include = True
+            if not include:
+                continue
+            simplified.append({
+                "id": it.get("id"),
+                "title": it.get("title"),
+                "url": it.get("url") or (it.get("source", {}) or {}).get("url"),
+                "source": ((it.get("source", {}) or {}).get("title")) if isinstance(it.get("source"), dict) else None,
+                "created_at": it.get("created_at"),
+                "kind": it.get("kind"),
+                "votes": (it.get("votes") or {}),
+                "currencies": [c.get("code") for c in (it.get("currencies") or []) if isinstance(c, dict)]
+            })
+            if len(simplified) >= limit:
+                break
+
+        response = {"items": simplified}
+        NEWS_CACHE["data"] = response
+        NEWS_CACHE["ts"] = now
+        NEWS_CACHE["params"] = params_signature
+        return JSONResponse(content=response)
+    except Exception as e:
+        return JSONResponse(content={"items": [], "error": str(e)}, status_code=200)
