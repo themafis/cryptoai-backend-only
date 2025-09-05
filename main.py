@@ -1110,14 +1110,14 @@ if __name__ == "__main__":
 # NEWS ENDPOINT (CryptoPanic)
 # =====================
 
-NEWS_CACHE = {"data": None, "ts": None, "params": None}
+# NEWS_CACHE = {"data": None, "ts": None, "params": None}  # DISABLED
 
 @app.get("/news")
 def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, region: str = "", max_age_days: int = 7):
     print(f"🔍 [NEWS DEBUG] Request: currencies={currencies}, filter={filter}, limit={limit}, region={region}")
     try:
-        # Cache disabled for debugging
-        print(f"🔍 [NEWS DEBUG] Cache disabled for debugging") 
+        # Cache completely disabled
+        print(f"🔍 [NEWS DEBUG] Cache completely disabled") 
 
         # NewsAPI.org kullan
         newsapi_token = "209b2715e9544c65b2b9dc294fd225e0"
@@ -1193,8 +1193,8 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         response = {"items": simplified}
         print(f"🔍 [NEWS DEBUG] Final response: {len(simplified)} items")
         
-        # Cache disabled for debugging
-        print(f"🔍 [NEWS DEBUG] Cache disabled for debugging")
+        # Cache completely disabled
+        print(f"🔍 [NEWS DEBUG] Cache completely disabled")
         
         return JSONResponse(content=response)
     except Exception as e:
