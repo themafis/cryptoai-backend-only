@@ -1118,13 +1118,14 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
     try:
         # Simple 120s cache per param-set
         now = int(datetime.utcnow().timestamp())
-        params_signature = f"{currencies}|{filter}|{limit}|{region}"
+        params_signature = f"{currencies}|{filter}|{limit}|{region}|{max_age_days}"
         if (
             NEWS_CACHE["data"] is not None
             and NEWS_CACHE["params"] == params_signature
             and NEWS_CACHE["ts"] is not None
             and now - NEWS_CACHE["ts"] < 120
         ):
+            print(f"🔍 [NEWS DEBUG] Returning cached data for {currencies}")
             return JSONResponse(content=NEWS_CACHE["data"]) 
 
         token = os.getenv("CRYPTOPANIC_TOKEN", "")
