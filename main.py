@@ -1114,6 +1114,7 @@ NEWS_CACHE = {"data": None, "ts": None, "params": None}
 
 @app.get("/news")
 def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, region: str = "", max_age_days: int = 7):
+    print(f"🔍 [NEWS DEBUG] Request: currencies={currencies}, filter={filter}, limit={limit}, region={region}")
     try:
         # Simple 120s cache per param-set
         now = int(datetime.utcnow().timestamp())
@@ -1139,9 +1140,17 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         if token:
             query["auth_token"] = token
 
+        print(f"🔍 [NEWS DEBUG] Making request to: {base}")
+        print(f"🔍 [NEWS DEBUG] Query params: {query}")
+        
         r = requests.get(base, params=query, timeout=10)
+        print(f"🔍 [NEWS DEBUG] Response status: {r.status_code}")
+        
         data = r.json()
+        print(f"🔍 [NEWS DEBUG] Response data: {data}")
+        
         items = data.get("results", [])
+        print(f"🔍 [NEWS DEBUG] Found {len(items)} items")
 
         simplified = []
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
@@ -1174,6 +1183,8 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
                 break
 
         response = {"items": simplified}
+        print(f"🔍 [NEWS DEBUG] Final response: {len(simplified)} items")
+        
         NEWS_CACHE["data"] = response
         NEWS_CACHE["ts"] = now
         NEWS_CACHE["params"] = params_signature
