@@ -1159,15 +1159,21 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         if region == "tr":
             turkish_items = []
             for item in items:
-                title = item.get("title", "").lower()
-                description = item.get("description", "").lower()
+                title = item.get("title", "")
+                description = item.get("description", "")
                 # Türkçe karakterler var mı kontrol et
                 turkish_chars = ["ç", "ğ", "ı", "ö", "ş", "ü", "Ç", "Ğ", "I", "İ", "Ö", "Ş", "Ü"]
                 has_turkish = any(char in title or char in description for char in turkish_chars)
                 if has_turkish:
                     turkish_items.append(item)
+                    print(f"🔍 [NEWS DEBUG] Turkish item found: {title[:50]}...")
             items = turkish_items
             print(f"🔍 [NEWS DEBUG] Filtered to {len(items)} Turkish items")
+            
+            # Eğer hiç Türkçe haber yoksa, boş döndür
+            if len(items) == 0:
+                print("❌ [NEWS DEBUG] No Turkish items after filtering - returning empty result")
+                return JSONResponse(content={"items": []})
 
         simplified = []
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
