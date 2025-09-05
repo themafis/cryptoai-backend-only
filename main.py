@@ -1127,7 +1127,6 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         query = {
             "q": f"{currencies} cryptocurrency",
             "language": "tr",
-            "country": "tr",
             "sortBy": "publishedAt",
             "pageSize": 10,
             "apiKey": newsapi_token
@@ -1149,7 +1148,6 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
             general_query = {
                 "q": "bitcoin ethereum cryptocurrency",
                 "language": "tr",
-                "country": "tr",
                 "sortBy": "publishedAt",
                 "pageSize": 10,
                 "apiKey": newsapi_token
