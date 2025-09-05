@@ -1150,9 +1150,9 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         items = data.get("results", [])
         print(f"🔍 [NEWS DEBUG] Found {len(items)} items (first try)")
 
-        # Fallback 1: If region was provided and no items, try without region
-        if not items and region:
-            print("🔁 [NEWS DEBUG] Retrying without region filter...")
+        # Force Turkish news - if no items with regions=tr, try without region but keep Turkish preference
+        if not items and region == "tr":
+            print("🔁 [NEWS DEBUG] No Turkish news found, trying without region filter...")
             retry_query = {k: v for k, v in query.items() if k != "regions"}
             r2 = requests.get(base, params=retry_query, timeout=10)
             print(f"🔍 [NEWS DEBUG] Retry status: {r2.status_code}")
@@ -1160,20 +1160,6 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
             print(f"🔍 [NEWS DEBUG] Retry data: {data2}")
             items = data2.get("results", [])
             print(f"🔍 [NEWS DEBUG] Found {len(items)} items (no region)")
-
-        # Fallback 2: If still empty and currencies specified, try generic BTC,ETH
-        if not items and currencies:
-            print("🔁 [NEWS DEBUG] Retrying with generic currencies BTC,ETH...")
-            retry_query2 = {k: v for k, v in query.items() if k != "currencies"}
-            retry_query2["currencies"] = "BTC,ETH"
-            # also ensure no region blocks
-            retry_query2.pop("regions", None)
-            r3 = requests.get(base, params=retry_query2, timeout=10)
-            print(f"🔍 [NEWS DEBUG] Retry2 status: {r3.status_code}")
-            data3 = r3.json()
-            print(f"🔍 [NEWS DEBUG] Retry2 data: {data3}")
-            items = data3.get("results", [])
-            print(f"🔍 [NEWS DEBUG] Found {len(items)} items (generic)")
 
         simplified = []
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
@@ -1196,7 +1182,7 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
                 "title": it.get("title"),
                 "url": it.get("url") or (it.get("source", {}) or {}).get("url"),
                 "source": ((it.get("source", {}) or {}).get("title")) if isinstance(it.get("source"), dict) else None,
-                "description": it.get("metadata", {}).get("description") if isinstance(it.get("metadata"), dict) else None,
+                "description": it.get("description"),
                 "created_at": it.get("created_at"),
                 "kind": it.get("kind"),
                 "votes": (it.get("votes") or {}),
