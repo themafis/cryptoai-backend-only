@@ -1150,36 +1150,24 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         items = data.get("results", [])
         print(f"🔍 [NEWS DEBUG] Found {len(items)} items (first try)")
 
-        # Force Turkish news - if no items with regions=tr, try without region but keep Turkish preference
+        # Sadece Türkçe haberler - fallback yok
         if len(items) == 0 and region == "tr":
-            print("🔁 [NEWS DEBUG] No Turkish news found, trying without region filter...")
-            retry_query = {k: v for k, v in query.items() if k != "regions"}
-            r2 = requests.get(base, params=retry_query, timeout=10)
-            print(f"🔍 [NEWS DEBUG] Retry status: {r2.status_code}")
-            data2 = r2.json()
-            print(f"🔍 [NEWS DEBUG] Retry data: {data2}")
-            items = data2.get("results", [])
-            print(f"🔍 [NEWS DEBUG] Found {len(items)} items (no region)")
+            print("❌ [NEWS DEBUG] No Turkish news found - returning empty result")
+            return JSONResponse(content={"items": []})
             
-            # If still no items, try with different currencies (BTC, ETH)
-            if len(items) == 0:
-                print("🔁 [NEWS DEBUG] Still no items, trying with BTC/ETH...")
-                fallback_query = {
-                    "filter": "hot",
-                    "kind": "news", 
-                    "currencies": "BTC,ETH",
-                    "public": "true",
-                    "regions": "tr"
-                }
-                if token:
-                    fallback_query["auth_token"] = token
-                    
-                r3 = requests.get(base, params=fallback_query, timeout=10)
-                print(f"🔍 [NEWS DEBUG] Fallback status: {r3.status_code}")
-                data3 = r3.json()
-                print(f"🔍 [NEWS DEBUG] Fallback data: {data3}")
-                items = data3.get("results", [])
-                print(f"🔍 [NEWS DEBUG] Found {len(items)} items (fallback)")
+        # Türkçe haberleri filtrele (eğer İngilizce gelirse)
+        if region == "tr":
+            turkish_items = []
+            for item in items:
+                title = item.get("title", "").lower()
+                description = item.get("description", "").lower()
+                # Türkçe karakterler var mı kontrol et
+                turkish_chars = ["ç", "ğ", "ı", "ö", "ş", "ü", "Ç", "Ğ", "I", "İ", "Ö", "Ş", "Ü"]
+                has_turkish = any(char in title or char in description for char in turkish_chars)
+                if has_turkish:
+                    turkish_items.append(item)
+            items = turkish_items
+            print(f"🔍 [NEWS DEBUG] Filtered to {len(items)} Turkish items")
 
         simplified = []
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
