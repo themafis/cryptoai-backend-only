@@ -3,9 +3,10 @@ import pandas as pd
 import pandas_ta as ta
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-import os
 import math
 import ccxt
+import requests
+import os
 import numpy as np
 from datetime import datetime, timedelta
 
@@ -1102,10 +1103,6 @@ def clean_json(obj):
     else:
         return obj
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-
 # =====================
 # NEWS ENDPOINT (NewsAPI.org)
 # =====================
@@ -1121,7 +1118,7 @@ def get_news(symbol: str = "BTC", max_age_days: int = 7):
         # Coin-specific haber ara
         query = {
             "q": f"{symbol} cryptocurrency",
-            "language": "tr",
+            "language": "en",
             "sortBy": "publishedAt",
             "pageSize": 10,
             "apiKey": newsapi_token
@@ -1140,7 +1137,7 @@ def get_news(symbol: str = "BTC", max_age_days: int = 7):
             print(f"🔍 [NEWS] No news for {symbol}, trying general crypto news...")
             general_query = {
                 "q": "bitcoin ethereum cryptocurrency",
-                "language": "tr",
+                "language": "en",
                 "sortBy": "publishedAt",
                 "pageSize": 10,
                 "apiKey": newsapi_token
@@ -1192,3 +1189,7 @@ def get_news(symbol: str = "BTC", max_age_days: int = 7):
     except Exception as e:
         print(f"❌ [NEWS] Error: {e}")
         return JSONResponse(content={"items": [], "error": str(e)}, status_code=200)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
