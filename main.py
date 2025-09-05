@@ -1151,7 +1151,7 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         print(f"🔍 [NEWS DEBUG] Found {len(items)} items (first try)")
 
         # Force Turkish news - if no items with regions=tr, try without region but keep Turkish preference
-        if not items and region == "tr":
+        if len(items) == 0 and region == "tr":
             print("🔁 [NEWS DEBUG] No Turkish news found, trying without region filter...")
             retry_query = {k: v for k, v in query.items() if k != "regions"}
             r2 = requests.get(base, params=retry_query, timeout=10)
@@ -1160,6 +1160,26 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
             print(f"🔍 [NEWS DEBUG] Retry data: {data2}")
             items = data2.get("results", [])
             print(f"🔍 [NEWS DEBUG] Found {len(items)} items (no region)")
+            
+            # If still no items, try with different currencies (BTC, ETH)
+            if len(items) == 0:
+                print("🔁 [NEWS DEBUG] Still no items, trying with BTC/ETH...")
+                fallback_query = {
+                    "filter": "hot",
+                    "kind": "news", 
+                    "currencies": "BTC,ETH",
+                    "public": "true",
+                    "regions": "tr"
+                }
+                if token:
+                    fallback_query["auth_token"] = token
+                    
+                r3 = requests.get(base, params=fallback_query, timeout=10)
+                print(f"🔍 [NEWS DEBUG] Fallback status: {r3.status_code}")
+                data3 = r3.json()
+                print(f"🔍 [NEWS DEBUG] Fallback data: {data3}")
+                items = data3.get("results", [])
+                print(f"🔍 [NEWS DEBUG] Found {len(items)} items (fallback)")
 
         simplified = []
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
