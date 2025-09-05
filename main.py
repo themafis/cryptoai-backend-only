@@ -1150,13 +1150,9 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
         items = data.get("results", [])
         print(f"🔍 [NEWS DEBUG] Found {len(items)} items (first try)")
 
-        # Sadece Türkçe haberler - fallback yok
-        if len(items) == 0 and region == "tr":
-            print("❌ [NEWS DEBUG] No Turkish news found - returning empty result")
-            return JSONResponse(content={"items": []})
-            
-        # Türkçe haberleri filtrele (eğer İngilizce gelirse)
+        # ZORLA Türkçe haber çek - İngilizce hiç gelmesin
         if region == "tr":
+            # Önce coin-specific Türkçe haberleri çek
             turkish_items = []
             for item in items:
                 title = item.get("title", "")
@@ -1167,38 +1163,29 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
                 if has_turkish:
                     turkish_items.append(item)
                     print(f"🔍 [NEWS DEBUG] Turkish item found: {title[:50]}...")
-            items = turkish_items
-            print(f"🔍 [NEWS DEBUG] Filtered to {len(items)} Turkish items")
             
-            # Eğer hiç Türkçe haber yoksa, boş döndür
-            if len(items) == 0:
-                print("❌ [NEWS DEBUG] No Turkish items after filtering - returning empty result")
-                return JSONResponse(content={"items": []})
+            # Eğer coin-specific Türkçe haber yoksa, genel Türkçe haberleri çek
+            if len(turkish_items) == 0:
+                print("🔁 [NEWS DEBUG] No coin-specific Turkish news, trying general Turkish news...")
+                general_query = {
+                    "filter": "hot",
+                    "kind": "news",
+                    "currencies": "BTC,ETH",
+                    "public": "true",
+                    "regions": "tr"
+                }
+                if token:
+                    general_query["auth_token"] = token
+                    
+                r_general = requests.get(base, params=general_query, timeout=10)
+                print(f"🔍 [NEWS DEBUG] General Turkish news status: {r_general.status_code}")
+                data_general = r_general.json()
+                print(f"🔍 [NEWS DEBUG] General Turkish news data: {data_general}")
+                general_items = data_general.get("results", [])
+                print(f"🔍 [NEWS DEBUG] Found {len(general_items)} general Turkish items")
                 
-        # Eğer Türkçe haber yoksa, genel Türkçe haberleri çek
-        if region == "tr" and len(items) == 0:
-            print("🔁 [NEWS DEBUG] No coin-specific Turkish news, trying general Turkish news...")
-            general_query = {
-                "filter": "hot",
-                "kind": "news",
-                "currencies": "BTC,ETH",
-                "public": "true",
-                "regions": "tr"
-            }
-            if token:
-                general_query["auth_token"] = token
-                
-            r_general = requests.get(base, params=general_query, timeout=10)
-            print(f"🔍 [NEWS DEBUG] General Turkish news status: {r_general.status_code}")
-            data_general = r_general.json()
-            print(f"🔍 [NEWS DEBUG] General Turkish news data: {data_general}")
-            items = data_general.get("results", [])
-            print(f"🔍 [NEWS DEBUG] Found {len(items)} general Turkish items")
-            
-            # Genel Türkçe haberleri de filtrele
-            if len(items) > 0:
-                turkish_items = []
-                for item in items:
+                # Genel Türkçe haberleri de filtrele
+                for item in general_items:
                     title = item.get("title", "")
                     description = item.get("description", "")
                     turkish_chars = ["ç", "ğ", "ı", "ö", "ş", "ü", "Ç", "Ğ", "I", "İ", "Ö", "Ş", "Ü"]
@@ -1206,13 +1193,14 @@ def get_news(currencies: str = "BTC,ETH", filter: str = "hot", limit: int = 10, 
                     if has_turkish:
                         turkish_items.append(item)
                         print(f"🔍 [NEWS DEBUG] General Turkish item found: {title[:50]}...")
-                items = turkish_items
-                print(f"🔍 [NEWS DEBUG] Filtered to {len(items)} general Turkish items")
-                
-                # Eğer hala hiç Türkçe haber yoksa, boş döndür
-                if len(items) == 0:
-                    print("❌ [NEWS DEBUG] No general Turkish items after filtering - returning empty result")
-                    return JSONResponse(content={"items": []})
+            
+            items = turkish_items
+            print(f"🔍 [NEWS DEBUG] Final Turkish items: {len(items)}")
+            
+            # Eğer hala hiç Türkçe haber yoksa, boş döndür
+            if len(items) == 0:
+                print("❌ [NEWS DEBUG] No Turkish items found - returning empty result")
+                return JSONResponse(content={"items": []})
 
         simplified = []
         cutoff = datetime.utcnow() - timedelta(days=max_age_days)
