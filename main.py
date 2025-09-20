@@ -9,6 +9,8 @@ import requests
 import os
 import numpy as np
 from datetime import datetime, timedelta
+import time
+from threading import Lock
 
 app = FastAPI()
 
@@ -16,6 +18,73 @@ app = FastAPI()
 binance = ccxt.binance({
     'sandbox': False
 })
+
+# --- Short TTL cache & rate limit / ban-backoff for Binance calls ---
+_cache: dict = {}
+_cache_lock = Lock()
+_last_call_ts = 0.0
+_min_interval_sec = 0.12  # ~8-9 calls/sec per IP
+_ban_until_ms = 0  # if banned, store expiry (epoch ms)
+
+def _get_cached(key: str, ttl: float):
+    now = time.time()
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and (now - entry['t']) < ttl:
+            return entry['v']
+    return None
+
+def _set_cached(key: str, value):
+    with _cache_lock:
+        _cache[key] = {'t': time.time(), 'v': value}
+
+def binance_call(key: str, ttl: float, fn):
+    """Unified wrapper: short TTL cache + simple rate limit + ban detection.
+    Returns cached value if available during ban window.
+    """
+    global _last_call_ts, _ban_until_ms
+    # If currently banned, return last cache (may be None)
+    now_ms = int(time.time() * 1000)
+    if now_ms < _ban_until_ms:
+        cached = _get_cached(key, ttl)
+        if cached is not None:
+            return cached
+        # no cache: raise a soft error handled by caller
+        raise RuntimeError("Binance rate limit ban active; no cached data")
+
+    # Serve fresh or cached
+    cached = _get_cached(key, ttl)
+    if cached is not None:
+        return cached
+
+    # Simple global pacing
+    dt = time.time() - _last_call_ts
+    if dt < _min_interval_sec:
+        time.sleep(_min_interval_sec - dt)
+
+    try:
+        val = fn()
+        _set_cached(key, val)
+        return val
+    except Exception as e:
+        msg = str(e)
+        if "Way too much request weight" in msg or "418" in msg or "-1003" in msg:
+            # Try to parse banned-until epoch ms
+            import re
+            m = re.search(r"until\s+(\d+)", msg)
+            if m:
+                try:
+                    _ban_until_ms = int(m.group(1))
+                except Exception:
+                    pass
+            # Fall back to cache if any
+            cached = _get_cached(key, ttl)
+            if cached is not None:
+                return cached
+        # Re-raise for caller to handle gracefully
+        raise
+    finally:
+        _last_call_ts = time.time()
 
 @app.get("/")
 def read_root():
@@ -254,30 +323,36 @@ def get_mini_scalping_data(symbol: str = "BTCUSDT"):
     try:
         print(f"[DEBUG] Mini scalping endpoint çağrıldı: {symbol}")
         
-        # Order book verisi
+        # Order book (cache 2s)
         try:
-            orderbook = binance.fetch_order_book(symbol, limit=20)
-            print(f"[DEBUG] Order book alındı: {len(orderbook['bids'])} bids, {len(orderbook['asks'])} asks")
+            orderbook = binance_call(f"ob:{symbol}:20", 2.0, lambda: binance.fetch_order_book(symbol, limit=20))
+            if orderbook is None:
+                orderbook = {"bids": [], "asks": []}
+            print(f"[DEBUG] Order book alındı (cache): {len(orderbook.get('bids', []))} bids, {len(orderbook.get('asks', []))} asks")
         except Exception as e:
             print(f"[ERROR] Order book hatası: {e}")
             orderbook = {"bids": [], "asks": []}
         
-        # Funding rate (futures için)
+        # Funding rate (cache 60s)
         try:
-            funding_rate = binance.fetch_funding_rate(symbol)
-            print(f"[DEBUG] Funding rate alındı: {funding_rate}")
+            funding_rate = binance_call(f"fr:{symbol}", 60.0, lambda: binance.fetch_funding_rate(symbol))
+            if funding_rate is None:
+                funding_rate = {"fundingRate": 0.0001, "nextFundingTime": 0, "openInterest": 0}
+            print(f"[DEBUG] Funding rate alındı (cache): {funding_rate}")
         except Exception as e:
             print(f"[ERROR] Funding rate hatası: {e}")
             funding_rate = {"fundingRate": 0.0001, "nextFundingTime": 0, "openInterest": 0}
         
-        # Teknik indikatörler (5m)
+        # Teknik indikatörler (5m) - cache 8s
         try:
-            ohlcv = binance.fetch_ohlcv(symbol, '5m', limit=100)
-            print(f"[DEBUG] OHLCV alındı: {len(ohlcv)} veri noktası")
+            ohlcv = binance_call(f"ohlcv:{symbol}:5m:100", 8.0, lambda: binance.fetch_ohlcv(symbol, '5m', limit=100))
+            if ohlcv is None:
+                raise RuntimeError("No cached 5m OHLCV available")
+            print(f"[DEBUG] OHLCV(5m) alındı (cache): {len(ohlcv)} veri noktası")
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             print(f"[DEBUG] DataFrame oluşturuldu: {df.shape}")
         except Exception as e:
-            print(f"[ERROR] OHLCV hatası: {e}")
+            print(f"[ERROR] OHLCV(5m) hatası: {e}")
             return {"error": f"OHLCV verisi alınamadı: {e}"}
         
         # RSI hesaplama
@@ -464,7 +539,7 @@ def get_mini_scalping_data(symbol: str = "BTCUSDT"):
         
         # Real-time price data
         try:
-            ticker = binance.fetch_ticker(symbol)
+            ticker = binance_call(f"ticker:{symbol}", 5.0, lambda: binance.fetch_ticker(symbol)) or {}
             current_price = safe_float(ticker['last'])
             price_change_24h = safe_float(ticker['change'])
             price_change_percent_24h = safe_float(ticker['percentage'])
@@ -496,6 +571,72 @@ def get_mini_scalping_data(symbol: str = "BTCUSDT"):
             volatility = 0.0
             atr_current = 0.0
         
+        # Mikro zaman serisi metrikleri (1m/5m RSI, volatility burst, LH/LL, delta approx)
+        def lower_high_lower_low_counts(series_high, series_low, lookback=10):
+            lh = 0
+            ll = 0
+            for i in range(2, min(lookback+2, len(series_high))):
+                if series_high.iloc[-i] < series_high.iloc[-i-1]:
+                    lh += 1
+                if series_low.iloc[-i] < series_low.iloc[-i-1]:
+                    ll += 1
+            return lh, ll
+
+        def volatility_burst(close_series, window=20):
+            rets = close_series.pct_change().dropna()
+            if len(rets) < window + 1:
+                return 0.0
+            recent = rets.iloc[-1]
+            std = rets.tail(window).std() or 0.0
+            return float(recent / std) if std != 0 else 0.0
+
+        def cvd_approx(close_series, volume_series):
+            # Yaklaşık CVD: bar yönü * hacim'in kümülatifi
+            if len(close_series) != len(volume_series):
+                return 0.0
+            direction = np.sign(close_series.diff().fillna(0))
+            delta = direction * volume_series
+            return float(delta.cumsum().iloc[-1])
+
+        # 1m ve 5m OHLCV ile mikro metrikleri hesapla
+        micro = {}
+        try:
+            ohlcv_1m = binance_call(f"ohlcv:{symbol}:1m:120", 8.0, lambda: binance.fetch_ohlcv(symbol, '1m', limit=120)) or []
+            d1 = pd.DataFrame(ohlcv_1m, columns=['timestamp','open','high','low','close','volume'])
+            micro['RSI_1m'] = float(ta.rsi(d1['close'], length=14).dropna().iloc[-1]) if not d1.empty else 0.0
+            micro['volBurst_1m'] = volatility_burst(d1['close'], window=20)
+            lh1, ll1 = lower_high_lower_low_counts(d1['high'], d1['low'], lookback=10)
+            micro['lowerHighCount_1m'] = int(lh1)
+            micro['lowerLowCount_1m'] = int(ll1)
+            micro['cvd_approx_1m'] = cvd_approx(d1['close'], d1['volume'])
+        except Exception:
+            micro.update({
+                'RSI_1m': 0.0,
+                'volBurst_1m': 0.0,
+                'lowerHighCount_1m': 0,
+                'lowerLowCount_1m': 0,
+                'cvd_approx_1m': 0.0
+            })
+
+        try:
+            # Reuse 5m if possible; else fetch with cache 8s
+            ohlcv_5m = ohlcv if len(ohlcv) >= 120 else binance_call(f"ohlcv:{symbol}:5m:120", 8.0, lambda: binance.fetch_ohlcv(symbol, '5m', limit=120)) or []
+            d5 = pd.DataFrame(ohlcv_5m, columns=['timestamp','open','high','low','close','volume'])
+            micro['RSI_5m'] = float(ta.rsi(d5['close'], length=14).dropna().iloc[-1]) if not d5.empty else 0.0
+            micro['volBurst_5m'] = volatility_burst(d5['close'], window=20)
+            lh5, ll5 = lower_high_lower_low_counts(d5['high'], d5['low'], lookback=10)
+            micro['lowerHighCount_5m'] = int(lh5)
+            micro['lowerLowCount_5m'] = int(ll5)
+            micro['cvd_approx_5m'] = cvd_approx(d5['close'], d5['volume'])
+        except Exception:
+            micro.update({
+                'RSI_5m': 0.0,
+                'volBurst_5m': 0.0,
+                'lowerHighCount_5m': 0,
+                'lowerLowCount_5m': 0,
+                'cvd_approx_5m': 0.0
+            })
+
         # JSON response için güvenli veri hazırlama
         response_data = {
             "priceData": {
@@ -602,7 +743,8 @@ def get_mini_scalping_data(symbol: str = "BTCUSDT"):
                 "MFI": safe_list(mfi.dropna().tail(3).tolist()),
                 "Donchian": safe_dict(donchian_df.iloc[-1].to_dict() if not donchian_df.empty else {}),
                 "Keltner": safe_dict(keltner_df.iloc[-1].to_dict() if not keltner_df.empty else {})
-            }
+            },
+            "microMetrics": {k: safe_float(v) if isinstance(v, float) else v for k, v in micro.items()}
         }
         
         # JSON formatında döndür
@@ -711,6 +853,11 @@ def get_scalping_data(symbol: str = "BTCUSDT"):
                 "CCI": safe_list(ta.cci(df['high'], df['low'], df['close']).dropna().tail(3).tolist()),
                 "ATR": safe_list(ta.atr(df['high'], df['low'], df['close']).dropna().tail(3).tolist()),
                 "KeltnerChannels": safe_dict(keltner.iloc[-1].to_dict() if not keltner.empty else {})
+            },
+            "microMetrics": {
+                # 1m/5m RSI ve approx CVD + volatility burst
+                "RSI_1m": safe_float(ta.rsi(get_binance_ohlcv(symbol, '1m', 120)['close'], length=14).dropna().iloc[-1]) if not get_binance_ohlcv(symbol, '1m', 120).empty else 0.0,
+                "RSI_5m": safe_float(ta.rsi(get_binance_ohlcv(symbol, '5m', 120)['close'], length=14).dropna().iloc[-1]) if not get_binance_ohlcv(symbol, '5m', 120).empty else 0.0
             }
         }
     except Exception as e:
