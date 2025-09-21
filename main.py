@@ -307,19 +307,23 @@ def get_mini_scalping_data(symbol: str = "BTCUSDT"):
     """Mini Scalping için özel veriler - sadece AI'ya gönderilir"""
     
     # JSON serialization için güvenli değerler
+    MISSING = "-"
+    MISSING_OBJ = {"error": "veri çekilemedi"}
+
     def safe_float(value):
         if np.isnan(value) or np.isinf(value):
-            return 0.0
+            return MISSING
         return float(value)
     
     def safe_list(values):
         if values is None:
-            return []
-        return [safe_float(v) for v in values if not (np.isnan(v) or np.isinf(v))]
+            return MISSING
+        cleaned = [safe_float(v) for v in values if not (np.isnan(v) or np.isinf(v))]
+        return cleaned if cleaned else MISSING
     
     def safe_dict(data_dict):
         if data_dict is None:
-            return {}
+            return MISSING_OBJ
         result = {}
         for key, value in data_dict.items():
             if isinstance(value, (int, float)):
@@ -328,7 +332,7 @@ def get_mini_scalping_data(symbol: str = "BTCUSDT"):
                 result[key] = safe_dict(value)
             else:
                 result[key] = value
-        return result
+        return result if len(result) else MISSING_OBJ
     
     try:
         print(f"[DEBUG] Mini scalping endpoint çağrıldı: {symbol}")
@@ -725,20 +729,20 @@ def get_mini_scalping_data(symbol: str = "BTCUSDT"):
                 "whaleTransactions": np.random.randint(20, 100)
             },
             "technicalIndicators": {
-                "RSI": safe_list(rsi.dropna().tail(3).tolist()),
-                "MACD": safe_dict(macd_df.iloc[-1].to_dict() if not macd_df.empty else {}),
-                "Stochastic": safe_dict(stoch_df.iloc[-1].to_dict() if not stoch_df.empty else {}),
-                "ATR": safe_list(atr.dropna().tail(3).tolist()),
+                "RSI": safe_list((rsi.dropna() if isinstance(rsi, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
+                "MACD": safe_dict(macd_df.iloc[-1].to_dict() if isinstance(macd_df, pd.DataFrame) and not macd_df.empty else None),
+                "Stochastic": safe_dict(stoch_df.iloc[-1].to_dict() if isinstance(stoch_df, pd.DataFrame) and not stoch_df.empty else None),
+                "ATR": safe_list((atr.dropna() if isinstance(atr, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
                 "Volume": safe_list(df['volume'].tail(3).tolist()),
-                "EMA_12": safe_list(ema_12.dropna().tail(3).tolist()),
-                "EMA_26": safe_list(ema_26.dropna().tail(3).tolist()),
-                "SMA_20": safe_list(sma_20.dropna().tail(3).tolist()),
-                "ADX": safe_dict(adx_df.iloc[-1].to_dict() if not adx_df.empty else {}),
-                "BollingerBands": safe_dict(bb_df.iloc[-1].to_dict() if not bb_df.empty else {}),
-                "StochRSI": safe_dict(stochrsi_df.iloc[-1].to_dict() if not stochrsi_df.empty else {}),
-                "CCI": safe_list(cci.dropna().tail(3).tolist()),
-                "OBV": safe_list(obv.dropna().tail(3).tolist()),
-                "VWAP": safe_list(vwap.dropna().tail(3).tolist()),
+                "EMA_12": safe_list((ema_12.dropna() if isinstance(ema_12, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
+                "EMA_26": safe_list((ema_26.dropna() if isinstance(ema_26, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
+                "SMA_20": safe_list((sma_20.dropna() if isinstance(sma_20, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
+                "ADX": safe_dict(adx_df.iloc[-1].to_dict() if isinstance(adx_df, pd.DataFrame) and not adx_df.empty else None),
+                "BollingerBands": safe_dict(bb_df.iloc[-1].to_dict() if isinstance(bb_df, pd.DataFrame) and not bb_df.empty else None),
+                "StochRSI": safe_dict(stochrsi_df.iloc[-1].to_dict() if isinstance(stochrsi_df, pd.DataFrame) and not stochrsi_df.empty else None),
+                "CCI": safe_list((cci.dropna() if isinstance(cci, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
+                "OBV": safe_list((obv.dropna() if isinstance(obv, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
+                "VWAP": safe_list((vwap.dropna() if isinstance(vwap, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
                 "PivotPoints": {
                     "pivot": safe_float(pivot.iloc[-1] if not pivot.empty else 0.0),
                     "resistance1": safe_float(r1.iloc[-1] if not r1.empty else 0.0),
@@ -747,12 +751,12 @@ def get_mini_scalping_data(symbol: str = "BTCUSDT"):
                     "support2": safe_float(s2.iloc[-1] if not s2.empty else 0.0)
                 },
                 "Ichimoku": ichimoku_data,
-                "ParabolicSAR": safe_dict(psar_df.iloc[-1].to_dict() if not psar_df.empty else {}),
-                "WilliamsR": safe_list(williams_r.dropna().tail(3).tolist()),
-                "Supertrend": safe_dict(supertrend_df.iloc[-1].to_dict() if not supertrend_df.empty else {}),
-                "MFI": safe_list(mfi.dropna().tail(3).tolist()),
-                "Donchian": safe_dict(donchian_df.iloc[-1].to_dict() if not donchian_df.empty else {}),
-                "Keltner": safe_dict(keltner_df.iloc[-1].to_dict() if not keltner_df.empty else {})
+                "ParabolicSAR": safe_dict(psar_df.iloc[-1].to_dict() if isinstance(psar_df, pd.DataFrame) and not psar_df.empty else None),
+                "WilliamsR": safe_list((williams_r.dropna() if isinstance(williams_r, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
+                "Supertrend": safe_dict(supertrend_df.iloc[-1].to_dict() if isinstance(supertrend_df, pd.DataFrame) and not supertrend_df.empty else None),
+                "MFI": safe_list((mfi.dropna() if isinstance(mfi, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
+                "Donchian": safe_dict(donchian_df.iloc[-1].to_dict() if isinstance(donchian_df, pd.DataFrame) and not donchian_df.empty else None),
+                "Keltner": safe_dict(keltner_df.iloc[-1].to_dict() if isinstance(keltner_df, pd.DataFrame) and not keltner_df.empty else None)
             },
             "microMetrics": {k: safe_float(v) if isinstance(v, float) else v for k, v in micro.items()}
         }
@@ -804,30 +808,49 @@ def get_scalping_data(symbol: str = "BTCUSDT"):
         
         # Keltner Channels
         keltner = ta.kc(df['high'], df['low'], df['close'])
+        # Bollinger Bands
+        try:
+            bb_scalp = ta.bbands(df['close'])
+        except Exception:
+            bb_scalp = pd.DataFrame()
         
         # Current price and 24h high/low for Scalping
         current_price = float(df['close'].iloc[-1])
         high_24h = float(df['high'].tail(24).max() if len(df) >= 24 else df['high'].max())
         low_24h = float(df['low'].tail(24).min() if len(df) >= 24 else df['low'].min())
         
-        # ATR hesaplama
-        atr_values = ta.atr(df['high'], df['low'], df['close']).dropna()
+        # ATR hesaplama (güvenli)
+        _atr_raw = None
+        try:
+            _atr_raw = ta.atr(df['high'], df['low'], df['close'])
+        except Exception:
+            _atr_raw = None
+        atr_values = (_atr_raw.dropna() if isinstance(_atr_raw, pd.Series) else pd.Series(dtype='float64'))
         current_atr = float(atr_values.iloc[-1]) if not atr_values.empty else 0.0
         
-        # JSON serialization için güvenli değerler
+        # JSON serialization için güvenli değerler (standartlaştırılmış)
+        MISSING = "-"
+        MISSING_OBJ = {"error": "veri çekilemedi"}
+
         def safe_float(value):
-            if np.isnan(value) or np.isinf(value):
-                return 0.0
-            return float(value)
+            if isinstance(value, (int, float)):
+                if np.isnan(value) or np.isinf(value):
+                    return MISSING
+                return float(value)
+            return MISSING
         
         def safe_list(values):
             if values is None:
-                return []
-            return [safe_float(v) for v in values if not (np.isnan(v) or np.isinf(v))]
+                return MISSING
+            cleaned = []
+            for v in values:
+                if isinstance(v, (int, float)) and not (np.isnan(v) or np.isinf(v)):
+                    cleaned.append(float(v))
+            return cleaned if cleaned else MISSING
         
         def safe_dict(data_dict):
             if data_dict is None:
-                return {}
+                return MISSING_OBJ
             result = {}
             for key, value in data_dict.items():
                 if isinstance(value, (int, float)):
@@ -836,8 +859,26 @@ def get_scalping_data(symbol: str = "BTCUSDT"):
                     result[key] = safe_dict(value)
                 else:
                     result[key] = value
-            return result
+            return result if len(result) else MISSING_OBJ
         
+        # TA hesaplamalarını güvenli hazırla (None dönerse boş Seri kullan)
+        _rsi_raw = ta.rsi(df['close'], length=14)
+        rsi_safe = _rsi_raw if isinstance(_rsi_raw, pd.Series) else pd.Series(dtype='float64')
+
+        _willr_raw = None
+        try:
+            _willr_raw = ta.willr(df['high'], df['low'], df['close'])
+        except Exception:
+            _willr_raw = None
+        willr_safe = _willr_raw if isinstance(_willr_raw, pd.Series) else pd.Series(dtype='float64')
+
+        _cci_raw = None
+        try:
+            _cci_raw = ta.cci(df['high'], df['low'], df['close'])
+        except Exception:
+            _cci_raw = None
+        cci_safe = _cci_raw if isinstance(_cci_raw, pd.Series) else pd.Series(dtype='float64')
+
         return {
             "priceData": {
                 "currentPrice": safe_float(current_price),
@@ -855,19 +896,20 @@ def get_scalping_data(symbol: str = "BTCUSDT"):
                 "S3": safe_float(s3)
             },
             "fibonacciLevels": {k: safe_float(v) for k, v in fibonacci_levels.items()},
-            "vwap": safe_list(vwap.dropna().tail(3).tolist()),
+            "vwap": safe_list((vwap.dropna() if isinstance(vwap, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
             "technicalIndicators": {
-                "RSI": safe_list(ta.rsi(df['close'], length=14).dropna().tail(3).tolist()),
+                "RSI": safe_list(rsi_safe.dropna().tail(3).tolist()),
                 "MACD": safe_dict(ta.macd(df['close']).iloc[-1].to_dict() if not ta.macd(df['close']).empty else {}),
-                "WilliamsR": safe_list(ta.willr(df['high'], df['low'], df['close']).dropna().tail(3).tolist()),
-                "CCI": safe_list(ta.cci(df['high'], df['low'], df['close']).dropna().tail(3).tolist()),
-                "ATR": safe_list(ta.atr(df['high'], df['low'], df['close']).dropna().tail(3).tolist()),
-                "KeltnerChannels": safe_dict(keltner.iloc[-1].to_dict() if not keltner.empty else {})
+                "WilliamsR": safe_list(willr_safe.dropna().tail(3).tolist()),
+                "CCI": safe_list(cci_safe.dropna().tail(3).tolist()),
+                "ATR": safe_list(atr_values.tail(3).tolist() if not atr_values.empty else []),
+                "KeltnerChannels": safe_dict(keltner.iloc[-1].to_dict() if not keltner.empty else None),
+                "BollingerBands": safe_dict(bb_scalp.iloc[-1].to_dict() if isinstance(bb_scalp, pd.DataFrame) and not bb_scalp.empty else None)
             },
             "microMetrics": {
                 # 1m/5m RSI ve approx CVD + volatility burst
-                "RSI_1m": safe_float(ta.rsi(get_binance_ohlcv(symbol, '1m', 120)['close'], length=14).dropna().iloc[-1]) if not get_binance_ohlcv(symbol, '1m', 120).empty else 0.0,
-                "RSI_5m": safe_float(ta.rsi(get_binance_ohlcv(symbol, '5m', 120)['close'], length=14).dropna().iloc[-1]) if not get_binance_ohlcv(symbol, '5m', 120).empty else 0.0
+                "RSI_1m": (lambda _d: safe_float((ta.rsi(_d['close'], length=14) if not _d.empty else pd.Series(dtype='float64')).dropna().iloc[-1]) if not (ta.rsi(_d['close'], length=14) is None or _d.empty or ta.rsi(_d['close'], length=14).dropna().empty) else 0.0)(get_binance_ohlcv(symbol, '1m', 120)),
+                "RSI_5m": (lambda _d: safe_float((ta.rsi(_d['close'], length=14) if not _d.empty else pd.Series(dtype='float64')).dropna().iloc[-1]) if not (ta.rsi(_d['close'], length=14) is None or _d.empty or ta.rsi(_d['close'], length=14).dropna().empty) else 0.0)(get_binance_ohlcv(symbol, '5m', 120))
             }
         }
     except Exception as e:
