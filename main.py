@@ -266,6 +266,20 @@ def robust_bbands(close: pd.Series, win: int = 5) -> pd.DataFrame:
     })
 
 # -----------------------------
+# Indicator utilities
+# -----------------------------
+def last_rsi_value_for(symbol: str, interval: str, length: int = 14, limit: int = 120, ttl: float = 2.0):
+    df = get_ohlcv(symbol, interval, limit, ttl)
+    if df is None or df.empty:
+        return MISSING
+    close = pd.to_numeric(df.get('close', pd.Series(dtype='float64')), errors='coerce')
+    rsi_series = ta.rsi(close, length=length)
+    rsi_series = rsi_series.dropna() if isinstance(rsi_series, pd.Series) else pd.Series(dtype='float64')
+    if rsi_series.empty:
+        return MISSING
+    return safe_float(rsi_series.iloc[-1])
+
+# -----------------------------
 # Background refresh (simulate WS impact)
 # -----------------------------
 POPULAR = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "TRXUSDT"]
@@ -367,17 +381,17 @@ def scalping(symbol: str = "BTCUSDT"):
             "fibonacciLevels": {k: safe_float(v) for k, v in fibonacci_levels.items()},
             "vwap": safe_list(vwap.dropna().tail(3).tolist()),
             "technicalIndicators": {
-                "RSI": safe_list((ta.rsi(df['close'], length=14) or pd.Series(dtype='float64')).dropna().tail(3).tolist()),
+                "RSI": safe_list((ta.rsi(df['close'], length=14).dropna() if isinstance(ta.rsi(df['close'], length=14), pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
                 "MACD": safe_dict(ta.macd(df['close']).iloc[-1].to_dict() if not ta.macd(df['close']).empty else None),
-                "WilliamsR": safe_list((ta.willr(df['high'], df['low'], df['close']) or pd.Series(dtype='float64')).dropna().tail(3).tolist()),
-                "CCI": safe_list((ta.cci(df['high'], df['low'], df['close']) or pd.Series(dtype='float64')).dropna().tail(3).tolist()),
+                "WilliamsR": safe_list((ta.willr(df['high'], df['low'], df['close']).dropna() if isinstance(ta.willr(df['high'], df['low'], df['close']), pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
+                "CCI": safe_list((ta.cci(df['high'], df['low'], df['close']).dropna() if isinstance(ta.cci(df['high'], df['low'], df['close']), pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
                 "ATR": safe_list(atr_vals.tail(3).tolist() if not atr_vals.empty else []),
                 "KeltnerChannels": safe_dict(keltner.iloc[-1].to_dict() if not keltner.empty else None),
                 "BollingerBands": safe_dict(bb.iloc[-1].to_dict() if not bb.empty else None),
             },
             "microMetrics": {
-                "RSI_1m": safe_float(((ta.rsi(get_ohlcv(symbol, '1m', 120, 2.0)['close'], length=14)) if (get_ohlcv(symbol, '1m', 120, 2.0) is not None) else pd.Series(dtype='float64')).dropna().iloc[-1]) if (get_ohlcv(symbol, '1m', 120, 2.0) is not None and not (ta.rsi(get_ohlcv(symbol, '1m', 120, 2.0)['close'], length=14) is None)) else MISSING,
-                "RSI_5m": safe_float(((ta.rsi(get_ohlcv(symbol, '5m', 120, 2.0)['close'], length=14)) if (get_ohlcv(symbol, '5m', 120, 2.0) is not None) else pd.Series(dtype='float64')).dropna().iloc[-1]) if (get_ohlcv(symbol, '5m', 120, 2.0) is not None and not (ta.rsi(get_ohlcv(symbol, '5m', 120, 2.0)['close'], length=14) is None)) else MISSING,
+                "RSI_1m": last_rsi_value_for(symbol, '1m', 14, 120, 2.0),
+                "RSI_5m": last_rsi_value_for(symbol, '5m', 14, 120, 2.0),
             }
         }
     except Exception as e:
@@ -452,7 +466,7 @@ def miniscalping(symbol: str = "BTCUSDT"):
             "orderBook": {
                 "bids": ob.get('bids', [])[:10],
                 "asks": ob.get('asks', [])[:10],
-                "spread": safe_float(ob['asks'][0][0] - ob['bids'][0][0]) if ob.get('asks') and ob.get('bids') else MISSING,
+                "spread": (lambda a,b: safe_float(a-b))(float(ob['asks'][0][0]), float(ob['bids'][0][0])) if ob.get('asks') and ob.get('bids') else MISSING,
                 "bidVolume": safe_float(sum([float(b[1]) for b in ob.get('bids', [])[:10]])) if ob.get('bids') else MISSING,
                 "askVolume": safe_float(sum([float(a[1]) for a in ob.get('asks', [])[:10]])) if ob.get('asks') else MISSING,
             },
@@ -498,8 +512,8 @@ def miniscalping(symbol: str = "BTCUSDT"):
                 },
             },
             "microMetrics": {
-                "RSI_1m": safe_float((ta.rsi((get_ohlcv(symbol, '1m', 120, 2.0) or pd.DataFrame()).get('close', pd.Series(dtype='float64')), length=14)).dropna().iloc[-1]) if get_ohlcv(symbol, '1m', 120, 2.0) is not None else MISSING,
-                "RSI_5m": safe_float((ta.rsi((get_ohlcv(symbol, '5m', 120, 2.0) or pd.DataFrame()).get('close', pd.Series(dtype='float64')), length=14)).dropna().iloc[-1]) if get_ohlcv(symbol, '5m', 120, 2.0) is not None else MISSING,
+                "RSI_1m": last_rsi_value_for(symbol, '1m', 14, 120, 2.0),
+                "RSI_5m": last_rsi_value_for(symbol, '5m', 14, 120, 2.0),
             }
         }
     except Exception as e:
