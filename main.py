@@ -352,8 +352,9 @@ def get_ohlcv(symbol: str, interval: str, limit: int = 100, ttl: float = 2.0) ->
             agg = d5.resample('15T').agg({'open':'first','high':'max','low':'min','close':'last','volume':'sum'}).dropna()
             if not agg.empty:
                 out = agg.tail(limit).reset_index()
-                out.rename(columns={"timestamp":"open_time"}, inplace=True)
-                return out
+                # keep standard column names for downstream TA
+                out.rename(columns={"timestamp":"open_time"}, inplace=False)
+                return out.rename(columns={"open_time":"timestamp"})
     key = cache_key(symbol, interval, limit)
     cached = CACHE.get(key)
     if isinstance(cached, pd.DataFrame):
@@ -398,6 +399,16 @@ def manual_vwap(df: pd.DataFrame) -> pd.Series:
         return vwap.fillna(method='ffill').fillna(df['close'])
     except Exception:
         return pd.Series([df['close'].mean()] * len(df), index=df.index)
+
+
+def ensure_numeric_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
+    """Coerce OHLCV numeric, drop fully empty rows, forward-fill minimal, keep last 'limit' rows."""
+    for c in ["open","high","low","close","volume"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+    # drop rows where close is nan
+    df = df.dropna(subset=[col for col in ["open","high","low","close"] if col in df.columns])
+    return df
 
 
 def robust_bbands(close: pd.Series, win: int = 20) -> pd.DataFrame:
@@ -554,8 +565,7 @@ def scalping(symbol: str = "BTCUSDT"):
             return {"error": "OHLCV verisi alınamadı"}
 
         # Ensure numeric types
-        for c in ["open", "high", "low", "close", "volume"]:
-            df[c] = pd.to_numeric(df[c], errors='coerce')
+        df = ensure_numeric_ohlcv(df)
 
         # Pivots
         high = df['high'].max()
@@ -623,6 +633,7 @@ def scalping(symbol: str = "BTCUSDT"):
                 "Keltner": row_to_float_dict(keltner),
                 "BollingerBands": build_bollinger_dict(df['close']),
                 "Bollinger": build_bollinger_dict(df['close']),
+                "Volume": series_tail_floats(df['volume'], 3),
             },
             "microMetrics": {
                 "RSI_1m": float(last_rsi_value_for(symbol, '1m', 14, 120, 2.0)),
@@ -664,8 +675,7 @@ def miniscalping(symbol: str = "BTCUSDT"):
         df = get_ohlcv(symbol, "5m", 100, ttl=2.0)
         if df is None or df.empty:
             return {"error": "OHLCV verisi alınamadı"}
-        for c in ["open", "high", "low", "close", "volume"]:
-            df[c] = pd.to_numeric(df[c], errors='coerce')
+        df = ensure_numeric_ohlcv(df)
 
         # Technicals
         rsi = ta.rsi(df['close'], length=14)
@@ -763,16 +773,12 @@ def miniscalping(symbol: str = "BTCUSDT"):
                 "ADX": row_to_float_dict(adx_df),
                 "BollingerBands": build_bollinger_dict(df['close']),
                 "Bollinger": build_bollinger_dict(df['close']),
-                "StochRSI": row_to_float_dict(stochrsi_df),
-                "CCI": series_tail_floats(cci, 3),
-                "OBV": series_tail_floats(obv, 3),
-                "VWAP": series_tail_floats(vwap, 3),
                 "PivotPoints": {
-                    "pivot": float(pivot.iloc[-1] if not pivot.empty else 0.0),
-                    "resistance1": float(r1.iloc[-1] if not r1.empty else 0.0),
-                    "support1": float(s1.iloc[-1] if not s1.empty else 0.0),
-                    "resistance2": float(r2.iloc[-1] if not r2.empty else 0.0),
-                    "support2": float(s2.iloc[-1] if not s2.empty else 0.0)
+                    "pivot": safe_float(pivot.iloc[-1] if not pivot.empty else 0.0),
+                    "resistance1": safe_float(r1.iloc[-1] if not r1.empty else 0.0),
+                    "support1": safe_float(s1.iloc[-1] if not s1.empty else 0.0),
+                    "resistance2": safe_float(r2.iloc[-1] if not r2.empty else 0.0),
+                    "support2": safe_float(s2.iloc[-1] if not s2.empty else 0.0)
                 },
             },
             "microMetrics": {
