@@ -66,7 +66,7 @@ def hma(
         hma.fillna(kwargs["fillna"], inplace=True)
 
     # Name and Category
-    hma.name = f"HMA{"" if mamode == "wma" else mamode[0]}_{length}"
+    hma.name = f"HMA{'' if mamode == 'wma' else mamode[0]}_{length}"
     hma.category = "overlap"
 
     return hma
