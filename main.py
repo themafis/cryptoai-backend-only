@@ -8,6 +8,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+import sys
+from pathlib import Path
+
+# Ensure vendored third_party packages (e.g., pandas_ta) are importable BEFORE importing them
+_THIRD_PARTY = Path(__file__).resolve().parent / "third_party"
+if str(_THIRD_PARTY) not in sys.path:
+    sys.path.insert(0, str(_THIRD_PARTY))
+
 import pandas_ta as ta
 import requests
 from fastapi import FastAPI

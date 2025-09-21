@@ -8,4 +8,3 @@ ccxt==4.1.77
 python-multipart==0.0.6
 requests==2.31.0
 python-dotenv==1.0.0
-pandas-ta==0.3.14b0
