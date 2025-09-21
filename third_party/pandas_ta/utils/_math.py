@@ -15,7 +15,21 @@ from numpy import min as np_min
 from numpy.lib.stride_tricks import sliding_window_view
 
 from pandas import DataFrame, Series
-from numba import njit
+# Optional numba: provide safe fallback if not installed
+try:
+    from numba import njit  # type: ignore
+except Exception:  # pragma: no cover - runtime fallback on platforms without numba
+    def njit(signature_or_function=None, **kwargs):  # noqa: N802 - keep api name
+        """Fallback no-op decorator when numba is unavailable."""
+        if callable(signature_or_function):
+            # Used as @njit without args
+            return signature_or_function
+
+        # Used as @njit(...)
+        def _decorator(func):
+            return func
+
+        return _decorator
 from pandas_ta._typing import (
     Array,
     DictLike,
