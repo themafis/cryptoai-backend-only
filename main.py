@@ -305,6 +305,43 @@ def row_to_float_dict(df_like: Optional[pd.DataFrame]) -> Dict[str, float]:
                 continue
         return out
 
+def build_bollinger_dict(close: pd.Series) -> Dict[str, float]:
+    """Return a combined dict for Bollinger with 5 and 20 period keys that iOS expects.
+    Includes keys like BBU_5_2.0, BBM_5_2.0, BBL_5_2.0 and same for 20; plus lower/middle/upper.
+    """
+    out: Dict[str, float] = {}
+    for length in (5, 20):
+        try:
+            bb_df = ta.bbands(close, length=length)
+        except Exception:
+            bb_df = None
+        if not isinstance(bb_df, pd.DataFrame) or bb_df.dropna().empty:
+            # fallback manual
+            mid = close.rolling(length).mean()
+            std = close.rolling(length).std(ddof=0)
+            upper = mid + 2 * std
+            lower = mid - 2 * std
+            tmp = pd.DataFrame({
+                f"BBL_{length}_2.0": lower,
+                f"BBM_{length}_2.0": mid,
+                f"BBU_{length}_2.0": upper,
+            })
+        else:
+            # normalize incoming keys to single 2.0 suffix
+            tmp = bb_df.rename(columns=lambda k: k.replace("_2.0_2.0", "_2.0").replace("BBL_", f"BBL_{length}_").replace("BBM_", f"BBM_{length}_").replace("BBU_", f"BBU_{length}_"))
+        row = tmp.dropna().iloc[-1] if not tmp.dropna().empty else None
+        if row is not None:
+            for k, v in row.items():
+                try:
+                    out[str(k)] = float(v)
+                except Exception:
+                    pass
+            # also provide generic aliases for current length (last computed)
+            out.setdefault("lower", float(row.iloc[0]))
+            out.setdefault("middle", float(row.iloc[1]))
+            out.setdefault("upper", float(row.iloc[2]))
+    return out
+
 def bollinger_with_alias(bb_dict: Dict[str, float]) -> Dict[str, float]:
     # Provide generic keys expected by some UIs
     out = dict(bb_dict)
@@ -426,8 +463,8 @@ def scalping(symbol: str = "BTCUSDT"):
                 "CCI": series_tail_floats(ta.cci(df['high'], df['low'], df['close']), 3),
                 "ATR": series_tail_floats(atr_vals if isinstance(atr_vals, pd.Series) else pd.Series(dtype='float64'), 3),
                 "Keltner": row_to_float_dict(keltner),
-                "BollingerBands": (lambda d: bollinger_with_alias(d))(row_to_float_dict(bb)),
-                "Bollinger": (lambda d: bollinger_with_alias(d))(row_to_float_dict(bb)),
+                "BollingerBands": build_bollinger_dict(df['close']),
+                "Bollinger": build_bollinger_dict(df['close']),
             },
             "microMetrics": {
                 "RSI_1m": float(last_rsi_value_for(symbol, '1m', 14, 120, 2.0)),
@@ -436,6 +473,31 @@ def scalping(symbol: str = "BTCUSDT"):
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/news")
+def news(symbol: Optional[str] = None, max_age_days: int = 7):
+    try:
+        # For now, serve a small mock list compatible with APIService.NewsItem / NewsResponse
+        # Fields: id, title, url, source, description, created_at, kind, votes, currencies
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        base = symbol or "BTC"
+        items = [
+            {
+                "id": f"{base}-{int(time.time())}",
+                "title": f"{base} market update",
+                "url": f"https://news.example.com/{base.lower()}",
+                "source": "CryptoAI",
+                "description": f"{base} için piyasa özeti ve volatilite görünümü.",
+                "created_at": now_iso,
+                "kind": "article",
+                "votes": {"up": 10, "down": 1},
+                "currencies": [base]
+            }
+        ]
+        return {"items": items}
+    except Exception as e:
+        return {"items": [], "error": str(e)}
 
 
 @app.get("/miniscalping/{symbol}")
@@ -541,8 +603,8 @@ def miniscalping(symbol: str = "BTCUSDT"):
                 "EMA_26": series_tail_floats(ema_26, 3),
                 "SMA_20": series_tail_floats(sma_20, 3),
                 "ADX": row_to_float_dict(adx_df),
-                "BollingerBands": bollinger_with_alias(row_to_float_dict(bb_df)),
-                "Bollinger": bollinger_with_alias(row_to_float_dict(bb_df)),
+                "BollingerBands": build_bollinger_dict(df['close']),
+                "Bollinger": build_bollinger_dict(df['close']),
                 "StochRSI": row_to_float_dict(stochrsi_df),
                 "CCI": series_tail_floats(cci, 3),
                 "OBV": series_tail_floats(obv, 3),
@@ -603,8 +665,8 @@ def dailytrading(symbol: str = "BTCUSDT"):
                 "RSI": series_tail_floats(rsi_values, 3),
                 "MACD": row_to_float_dict(macd_values),
                 "ADX": row_to_float_dict(ta.adx(df['high'], df['low'], df['close'])),
-                "BollingerBands": bollinger_with_alias(row_to_float_dict(bb)),
-                "Bollinger": bollinger_with_alias(row_to_float_dict(bb)),
+                "BollingerBands": build_bollinger_dict(df['close']),
+                "Bollinger": build_bollinger_dict(df['close']),
                 "ATR": series_tail_floats(atr_values, 3),
                 "Volume": series_tail_floats(df['volume'], 10),
                 "PivotPoints": {
