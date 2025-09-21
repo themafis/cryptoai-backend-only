@@ -4,8 +4,8 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 numpy==1.24.3
 pandas==2.0.3
-# Install pandas_ta from GitHub development branch ZIP (public, no git auth)
-pandas_ta @ https://github.com/twopirllc/pandas-ta/archive/refs/heads/development.zip
+# Install pandas_ta from GitHub tag ZIP (public, no git auth)
+pandas_ta @ https://github.com/twopirllc/pandas-ta/archive/refs/tags/0.3.14b0.zip
 ccxt==4.1.77
 python-multipart==0.0.6
 requests==2.31.0
