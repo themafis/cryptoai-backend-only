@@ -10,7 +10,12 @@ from pandas.api.extensions import register_dataframe_accessor
 from pandas.errors import PerformanceWarning
 from pandas import DataFrame, Series
 from pandas import options as pd_options
-from tqdm import tqdm
+# Optional tqdm: progress bar only if installed; otherwise no-op
+try:
+    from tqdm import tqdm  # type: ignore
+except Exception:  # pragma: no cover
+    def tqdm(iterable=None, *args, **kwargs):
+        return iterable if iterable is not None else []
 
 from pandas_ta._typing import *
 from pandas_ta import *
