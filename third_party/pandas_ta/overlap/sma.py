@@ -1,5 +1,14 @@
 # -*- coding: utf-8 -*-
-from numba import njit
+# Optional numba: provide safe fallback if not installed
+try:
+    from numba import njit  # type: ignore
+except Exception:
+    def njit(signature_or_function=None, **kwargs):
+        if callable(signature_or_function):
+            return signature_or_function
+        def _decorator(func):
+            return func
+        return _decorator
 from numpy import convolve, ones
 from pandas import Series
 from pandas_ta._typing import DictLike, Int
