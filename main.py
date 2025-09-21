@@ -249,7 +249,7 @@ def manual_vwap(df: pd.DataFrame) -> pd.Series:
 
 def robust_bbands(close: pd.Series, win: int = 20) -> pd.DataFrame:
     try:
-        bb = ta.bbands(close)
+        bb = ta.bbands(close, length=win)
         if isinstance(bb, pd.DataFrame) and not bb.empty:
             return bb
     except Exception:
@@ -288,7 +288,11 @@ def series_tail_floats(series: Optional[pd.Series], n: int) -> List[float]:
 def row_to_float_dict(df_like: Optional[pd.DataFrame]) -> Dict[str, float]:
     if not isinstance(df_like, pd.DataFrame) or df_like.empty:
         return {}
-    row = df_like.iloc[-1].dropna()
+    # Prefer last fully-populated row to avoid NaNs at the very tail
+    clean_df = df_like.dropna()
+    if clean_df.empty:
+        return {}
+    row = clean_df.iloc[-1]
     try:
         return {str(k): float(v) for k, v in row.items() if np.isfinite(v)}
     except Exception:
@@ -392,13 +396,11 @@ def scalping(symbol: str = "BTCUSDT"):
                 "atr": safe_float(current_atr)
             },
             "pivotPoints": {
-                "PP": safe_float(pp),
-                "R1": safe_float(r1),
-                "R2": safe_float(r2),
-                "R3": safe_float(r3),
-                "S1": safe_float(s1),
-                "S2": safe_float(s2),
-                "S3": safe_float(s3)
+                "pivot": safe_float(pp),
+                "resistance1": safe_float(r1),
+                "support1": safe_float(s1),
+                "resistance2": safe_float(r2),
+                "support2": safe_float(s2)
             },
             "fibonacciLevels": {k: safe_float(v) for k, v in fibonacci_levels.items()},
             "vwap": safe_list(vwap.dropna().tail(3).tolist()),
@@ -595,13 +597,13 @@ def dailytrading(symbol: str = "BTCUSDT"):
                     "support2": float(s2.iloc[-1] if not s2.empty else 0.0),
                 },
             },
-            "sentiment": {
+            "marketSentiment": {
                 "fearGreedIndex": int(np.random.randint(20, 80)),
                 "socialSentiment": safe_float(float(np.random.uniform(-1, 1))),
                 "newsSentiment": safe_float(float(np.random.uniform(-1, 1))),
                 "institutionalFlow": safe_float(float(np.random.uniform(1e7, 5e7)))
             },
-            "correlation": {
+            "correlationData": {
                 "btcCorrelation": safe_float(float(np.random.uniform(0.5, 0.95))),
                 "ethCorrelation": safe_float(float(np.random.uniform(0.3, 0.8))),
                 "marketCapRank": 1
