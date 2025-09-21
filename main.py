@@ -512,8 +512,9 @@ def build_bollinger_dict(close: pd.Series) -> Dict[str, float]:
                 f"BBU_{length}_2.0": upper,
             })
         else:
-            # normalize incoming keys to single 2.0 suffix
-            tmp = bb_df.rename(columns=lambda k: k.replace("_2.0_2.0", "_2.0").replace("BBL_", f"BBL_{length}_").replace("BBM_", f"BBM_{length}_").replace("BBU_", f"BBU_{length}_"))
+            # normalize only duplicated 2.0 suffix; keep original column names from pandas_ta
+            # expected keys like BBL_5_2.0, BBM_5_2.0, BBU_5_2.0 (and 20 period variants)
+            tmp = bb_df.rename(columns=lambda k: k.replace("_2.0_2.0", "_2.0"))
         row = tmp.dropna().iloc[-1] if not tmp.dropna().empty else None
         if row is not None:
             for k, v in row.items():
