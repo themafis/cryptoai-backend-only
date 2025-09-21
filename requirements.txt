@@ -4,8 +4,8 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 numpy==1.24.3
 pandas==2.0.3
-# Install pandas-ta via ZIP URL (use main branch)
-pandas-ta @ https://github.com/twopirllc/pandas-ta/archive/refs/heads/main.zip
+# Use pandas-ta from PyPI (no version pin for Py3.11 compatibility)
+pandas-ta
 ccxt==4.1.77
 python-multipart==0.0.6
 requests==2.31.0
