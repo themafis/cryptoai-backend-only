@@ -247,7 +247,7 @@ def manual_vwap(df: pd.DataFrame) -> pd.Series:
         return pd.Series([df['close'].mean()] * len(df), index=df.index)
 
 
-def robust_bbands(close: pd.Series, win: int = 5) -> pd.DataFrame:
+def robust_bbands(close: pd.Series, win: int = 20) -> pd.DataFrame:
     try:
         bb = ta.bbands(close)
         if isinstance(bb, pd.DataFrame) and not bb.empty:
@@ -408,7 +408,7 @@ def scalping(symbol: str = "BTCUSDT"):
                 "WilliamsR": series_tail_floats(ta.willr(df['high'], df['low'], df['close']), 3),
                 "CCI": series_tail_floats(ta.cci(df['high'], df['low'], df['close']), 3),
                 "ATR": series_tail_floats(atr_vals if isinstance(atr_vals, pd.Series) else pd.Series(dtype='float64'), 3),
-                "KeltnerChannels": row_to_float_dict(keltner),
+                "Keltner": row_to_float_dict(keltner),
                 "BollingerBands": row_to_float_dict(bb),
             },
             "microMetrics": {
