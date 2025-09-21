@@ -20,6 +20,10 @@ import pandas_ta as ta
 import requests
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+try:
+    import websockets  # type: ignore
+except Exception:
+    websockets = None  # Optional dependency; REST fallback will remain
 
 # Optional: ccxt as the last fallback
 try:
@@ -104,6 +108,134 @@ def clean_json(obj: Any) -> Any:
         return obj
     return obj
 
+# -----------------------------
+# Binance Futures WebSocket manager (shared cache)
+# -----------------------------
+FSTREAM_WS = "wss://fstream.binance.com/stream"
+
+class WSSymbolCache:
+    def __init__(self):
+        self.klines_1m: List[List[float]] = []  # [ts,o,h,l,c,v]
+        self.klines_5m: List[List[float]] = []
+        self.book_ticker: Dict[str, float] = {}
+        self.depth_bids: List[List[float]] = []
+        self.depth_asks: List[List[float]] = []
+
+class FuturesWSManager:
+    def __init__(self):
+        self.cache: Dict[str, WSSymbolCache] = {}
+        self._running = False
+
+    def ensure_symbol(self, symbol: str):
+        s = symbol.upper()
+        if s not in self.cache:
+            self.cache[s] = WSSymbolCache()
+
+    def get_klines(self, symbol: str, interval: str) -> List[List[float]]:
+        s = symbol.upper()
+        sc = self.cache.get(s)
+        if not sc:
+            return []
+        if interval == '1m':
+            return sc.klines_1m
+        if interval == '5m':
+            return sc.klines_5m
+        return []
+
+    def get_orderbook(self, symbol: str) -> Dict[str, List[List[float]]]:
+        s = symbol.upper()
+        sc = self.cache.get(s)
+        if not sc:
+            return {"bids": [], "asks": []}
+        return {"bids": sc.depth_bids, "asks": sc.depth_asks}
+
+    async def run(self, preload: List[str]):
+        if websockets is None:
+            return
+        for s in preload:
+            self.ensure_symbol(s)
+        backoff = 1
+        while True:
+            try:
+                streams: List[str] = []
+                for s in list(self.cache.keys()):
+                    low = s.lower()
+                    streams.extend([
+                        f"{low}@kline_1m",
+                        f"{low}@kline_5m",
+                        f"{low}@bookTicker",
+                        f"{low}@depth20@100ms",
+                    ])
+                if not streams:
+                    await asyncio.sleep(1.0)
+                    continue
+                url = FSTREAM_WS + "?streams=" + "/".join(streams)
+                async with websockets.connect(url, ping_interval=20, ping_timeout=20) as ws:  # type: ignore
+                    backoff = 1
+                    async for raw in ws:
+                        try:
+                            msg = json.loads(raw)
+                        except Exception:
+                            continue
+                        data = msg.get("data") or {}
+                        stream = msg.get("stream", "")
+                        if not data or not stream:
+                            continue
+                        sym = (data.get('s') or data.get('ps') or '').upper()
+                        if not sym:
+                            try:
+                                sym = stream.split('@')[0].upper()
+                            except Exception:
+                                continue
+                        self.ensure_symbol(sym)
+                        sc = self.cache[sym]
+                        if '@kline_1m' in stream:
+                            k = data.get('k') or {}
+                            try:
+                                row = [int(k.get('t')), float(k.get('o')), float(k.get('h')), float(k.get('l')), float(k.get('c')), float(k.get('v'))]
+                                if sc.klines_1m and sc.klines_1m[-1][0] == row[0]:
+                                    sc.klines_1m[-1] = row
+                                else:
+                                    sc.klines_1m.append(row)
+                                    if len(sc.klines_1m) > 360:
+                                        sc.klines_1m = sc.klines_1m[-360:]
+                            except Exception:
+                                pass
+                        elif '@kline_5m' in stream:
+                            k = data.get('k') or {}
+                            try:
+                                row = [int(k.get('t')), float(k.get('o')), float(k.get('h')), float(k.get('l')), float(k.get('c')), float(k.get('v'))]
+                                if sc.klines_5m and sc.klines_5m[-1][0] == row[0]:
+                                    sc.klines_5m[-1] = row
+                                else:
+                                    sc.klines_5m.append(row)
+                                    if len(sc.klines_5m) > 360:
+                                        sc.klines_5m = sc.klines_5m[-360:]
+                            except Exception:
+                                pass
+                        elif '@bookTicker' in stream:
+                            try:
+                                sc.book_ticker = {
+                                    'b': float(data.get('b', 0.0) or 0.0),
+                                    'B': float(data.get('B', 0.0) or 0.0),
+                                    'a': float(data.get('a', 0.0) or 0.0),
+                                    'A': float(data.get('A', 0.0) or 0.0),
+                                }
+                            except Exception:
+                                pass
+                        elif '@depth' in stream:
+                            try:
+                                bids = data.get('b', [])
+                                asks = data.get('a', [])
+                                sc.depth_bids = [[float(p), float(q)] for p, q in bids[:20]]
+                                sc.depth_asks = [[float(p), float(q)] for p, q in asks[:20]]
+                            except Exception:
+                                pass
+            except Exception:
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 30)
+
+WS_MANAGER = FuturesWSManager()
 # -----------------------------
 # Binance REST helpers (Futures first, Spot fallback)
 # -----------------------------
@@ -205,6 +337,23 @@ def cache_key(symbol: str, interval: str, limit: int) -> str:
 
 
 def get_ohlcv(symbol: str, interval: str, limit: int = 100, ttl: float = 2.0) -> Optional[pd.DataFrame]:
+    # Prefer WS cache if available for 1m/5m, and derive 15m from 5m to reduce REST load
+    if interval in ("1m", "5m"):
+        rows = WS_MANAGER.get_klines(symbol, interval)
+        if rows:
+            df_ws = pd.DataFrame(rows[-limit:], columns=["timestamp", "open", "high", "low", "close", "volume"])
+            return df_ws
+    if interval == "15m":
+        rows5 = WS_MANAGER.get_klines(symbol, "5m")
+        if rows5:
+            d5 = pd.DataFrame(rows5, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            d5["timestamp"] = pd.to_datetime(d5["timestamp"], unit="ms")
+            d5 = d5.set_index("timestamp")
+            agg = d5.resample('15T').agg({'open':'first','high':'max','low':'min','close':'last','volume':'sum'}).dropna()
+            if not agg.empty:
+                out = agg.tail(limit).reset_index()
+                out.rename(columns={"timestamp":"open_time"}, inplace=True)
+                return out
     key = cache_key(symbol, interval, limit)
     cached = CACHE.get(key)
     if isinstance(cached, pd.DataFrame):
@@ -223,6 +372,10 @@ def get_ohlcv(symbol: str, interval: str, limit: int = 100, ttl: float = 2.0) ->
 
 
 def get_orderbook(symbol: str, limit: int = 20, ttl: float = 2.0) -> Optional[Dict[str, Any]]:
+    # Prefer WS depth cache
+    ob_ws = WS_MANAGER.get_orderbook(symbol)
+    if ob_ws.get('bids') or ob_ws.get('asks'):
+        return ob_ws
     key = f"orderbook:{symbol}:{limit}"
     cached = CACHE.get(key)
     if isinstance(cached, dict):
@@ -379,6 +532,11 @@ async def background_refresher():
 async def on_startup():
     # Start background refresher
     asyncio.create_task(background_refresher())
+    # Start WS manager with a small preload; any new symbols will be added on demand
+    try:
+        asyncio.create_task(WS_MANAGER.run(["BTCUSDT", "ETHUSDT", "SOLUSDT"]))
+    except Exception:
+        pass
 
 # -----------------------------
 # Endpoints
