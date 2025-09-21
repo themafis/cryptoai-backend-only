@@ -305,6 +305,21 @@ def row_to_float_dict(df_like: Optional[pd.DataFrame]) -> Dict[str, float]:
                 continue
         return out
 
+def bollinger_with_alias(bb_dict: Dict[str, float]) -> Dict[str, float]:
+    # Provide generic keys expected by some UIs
+    out = dict(bb_dict)
+    # try to map by searching keys
+    lower_key = next((k for k in bb_dict.keys() if k.startswith("BBL_") or k.lower().endswith("lower")), None)
+    mid_key = next((k for k in bb_dict.keys() if k.startswith("BBM_") or k.lower().endswith("mid") or k.lower().endswith("middle")), None)
+    upper_key = next((k for k in bb_dict.keys() if k.startswith("BBU_") or k.lower().endswith("upper")), None)
+    if lower_key and "lower" not in out:
+        out["lower"] = float(bb_dict[lower_key])
+    if mid_key and "middle" not in out:
+        out["middle"] = float(bb_dict[mid_key])
+    if upper_key and "upper" not in out:
+        out["upper"] = float(bb_dict[upper_key])
+    return out
+
 # -----------------------------
 # Background refresh (simulate WS impact)
 # -----------------------------
@@ -411,7 +426,8 @@ def scalping(symbol: str = "BTCUSDT"):
                 "CCI": series_tail_floats(ta.cci(df['high'], df['low'], df['close']), 3),
                 "ATR": series_tail_floats(atr_vals if isinstance(atr_vals, pd.Series) else pd.Series(dtype='float64'), 3),
                 "Keltner": row_to_float_dict(keltner),
-                "BollingerBands": row_to_float_dict(bb),
+                "BollingerBands": (lambda d: bollinger_with_alias(d))(row_to_float_dict(bb)),
+                "Bollinger": (lambda d: bollinger_with_alias(d))(row_to_float_dict(bb)),
             },
             "microMetrics": {
                 "RSI_1m": float(last_rsi_value_for(symbol, '1m', 14, 120, 2.0)),
@@ -525,7 +541,8 @@ def miniscalping(symbol: str = "BTCUSDT"):
                 "EMA_26": series_tail_floats(ema_26, 3),
                 "SMA_20": series_tail_floats(sma_20, 3),
                 "ADX": row_to_float_dict(adx_df),
-                "BollingerBands": row_to_float_dict(bb_df),
+                "BollingerBands": bollinger_with_alias(row_to_float_dict(bb_df)),
+                "Bollinger": bollinger_with_alias(row_to_float_dict(bb_df)),
                 "StochRSI": row_to_float_dict(stochrsi_df),
                 "CCI": series_tail_floats(cci, 3),
                 "OBV": series_tail_floats(obv, 3),
@@ -586,7 +603,8 @@ def dailytrading(symbol: str = "BTCUSDT"):
                 "RSI": series_tail_floats(rsi_values, 3),
                 "MACD": row_to_float_dict(macd_values),
                 "ADX": row_to_float_dict(ta.adx(df['high'], df['low'], df['close'])),
-                "BollingerBands": row_to_float_dict(bb),
+                "BollingerBands": bollinger_with_alias(row_to_float_dict(bb)),
+                "Bollinger": bollinger_with_alias(row_to_float_dict(bb)),
                 "ATR": series_tail_floats(atr_values, 3),
                 "Volume": series_tail_floats(df['volume'], 10),
                 "PivotPoints": {
@@ -731,7 +749,9 @@ def swingtrading(symbol: str = "BTCUSDT"):
                 "resistance1": float(r1.iloc[-1] if not r1.empty else 0.0),
                 "support1": float(s1.iloc[-1] if not s1.empty else 0.0),
                 "resistance2": float(r2.iloc[-1] if not r2.empty else 0.0),
-                "support2": float(s2.iloc[-1] if not s2.empty else 0.0)
+                "support2": float(s2.iloc[-1] if not s2.empty else 0.0),
+                "nearestSupport": float(s1.iloc[-1] if not s1.empty else 0.0),
+                "nearestResistance": float(r1.iloc[-1] if not r1.empty else 0.0)
             },
             "fundamental": {
                 "marketCap": float(np.random.uniform(5e11, 1e12)),
@@ -762,6 +782,58 @@ def swingtrading(symbol: str = "BTCUSDT"):
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/ai/mini/{symbol}")
+def ai_mini(symbol: str = "BTCUSDT"):
+    try:
+        # Fetch base data
+        df = get_ohlcv(symbol, "5m", 120, ttl=2.0)
+        if df is None or df.empty:
+            return {"commentary": "Veri alınamadı: OHLCV boş."}
+
+        # Ensure numeric
+        for c in ["open", "high", "low", "close", "volume"]:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+
+        # Indicators
+        rsi_series = ta.rsi(df['close'], length=14).dropna()
+        macd_df = ta.macd(df['close'])
+        bb = robust_bbands(df['close'])
+        bb_dict = bollinger_with_alias(row_to_float_dict(bb))
+        bbp = bb_dict.get("BBP_20_2.0_2.0") or bb_dict.get("bbp") or None
+
+        atr = ta.atr(df['high'], df['low'], df['close']).dropna()
+        atr_val = float(atr.iloc[-1]) if not atr.empty else 0.0
+
+        # Orderbook spread
+        ob = get_orderbook(symbol, limit=10, ttl=2.0) or {"bids": [], "asks": []}
+        spread = 0.0
+        if ob.get('asks') and ob.get('bids'):
+            spread = float(ob['asks'][0][0]) - float(ob['bids'][0][0])
+
+        # Extract last values
+        rsi_val = float(rsi_series.iloc[-1]) if not rsi_series.empty else 0.0
+        macd_hist = 0.0
+        if isinstance(macd_df, pd.DataFrame) and not macd_df.dropna().empty:
+            row = macd_df.dropna().iloc[-1]
+            macd_hist = float(row.get('MACDh_12_26_9', 0.0))
+
+        # Simple rules
+        bias = "nötr"
+        if rsi_val >= 60 and macd_hist > 0:
+            bias = "yükseliş"
+        elif rsi_val <= 40 and macd_hist < 0:
+            bias = "düşüş"
+
+        vol_note = "yüksek volatilite" if atr_val > 0 and (atr_val / max(1e-9, float(df['close'].iloc[-1])) > 0.002) else "sakin volatilite"
+        bb_note = "orta bant çevresi" if bbp is None else ("üst banda yakın" if bbp > 0.6 else ("alt banda yakın" if bbp < 0.4 else "orta bant çevresi"))
+        liq_note = "spread dar" if spread < (float(df['close'].iloc[-1]) * 0.0005) else "spread geniş"
+
+        text = f"AI: {symbol} için {bias}. {bb_note}, {vol_note}, {liq_note}. RSI={rsi_val:.1f}, MACDh={macd_hist:.3f}."
+        return {"commentary": text}
+    except Exception as e:
+        return {"commentary": f"Veri alınamadı: {str(e)}"}
 
 
 if __name__ == "__main__":
