@@ -4,8 +4,8 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 numpy==1.24.3
 pandas==2.0.3
-# Install pandas-ta from GitHub for better Py3.11 support on Render
-git+https://github.com/twopirllc/pandas-ta.git
+# Install pandas-ta via ZIP URL (no git required) for Render compatibility
+pandas-ta @ https://github.com/twopirllc/pandas-ta/archive/refs/heads/master.zip
 ccxt==4.1.77
 python-multipart==0.0.6
 requests==2.31.0
