@@ -271,13 +271,35 @@ def robust_bbands(close: pd.Series, win: int = 5) -> pd.DataFrame:
 def last_rsi_value_for(symbol: str, interval: str, length: int = 14, limit: int = 120, ttl: float = 2.0):
     df = get_ohlcv(symbol, interval, limit, ttl)
     if df is None or df.empty:
-        return MISSING
+        return 0.0
     close = pd.to_numeric(df.get('close', pd.Series(dtype='float64')), errors='coerce')
     rsi_series = ta.rsi(close, length=length)
     rsi_series = rsi_series.dropna() if isinstance(rsi_series, pd.Series) else pd.Series(dtype='float64')
     if rsi_series.empty:
-        return MISSING
-    return safe_float(rsi_series.iloc[-1])
+        return 0.0
+    return float(rsi_series.iloc[-1])
+
+def series_tail_floats(series: Optional[pd.Series], n: int) -> List[float]:
+    if not isinstance(series, pd.Series):
+        return []
+    arr = series.dropna().tail(n).astype(float).tolist()
+    return arr
+
+def row_to_float_dict(df_like: Optional[pd.DataFrame]) -> Dict[str, float]:
+    if not isinstance(df_like, pd.DataFrame) or df_like.empty:
+        return {}
+    row = df_like.iloc[-1].dropna()
+    try:
+        return {str(k): float(v) for k, v in row.items() if np.isfinite(v)}
+    except Exception:
+        # Fallback: attempt to coerce all
+        out: Dict[str, float] = {}
+        for k, v in row.items():
+            try:
+                out[str(k)] = float(v)
+            except Exception:
+                continue
+        return out
 
 # -----------------------------
 # Background refresh (simulate WS impact)
@@ -381,17 +403,17 @@ def scalping(symbol: str = "BTCUSDT"):
             "fibonacciLevels": {k: safe_float(v) for k, v in fibonacci_levels.items()},
             "vwap": safe_list(vwap.dropna().tail(3).tolist()),
             "technicalIndicators": {
-                "RSI": safe_list((ta.rsi(df['close'], length=14).dropna() if isinstance(ta.rsi(df['close'], length=14), pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
-                "MACD": safe_dict(ta.macd(df['close']).iloc[-1].to_dict() if not ta.macd(df['close']).empty else None),
-                "WilliamsR": safe_list((ta.willr(df['high'], df['low'], df['close']).dropna() if isinstance(ta.willr(df['high'], df['low'], df['close']), pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
-                "CCI": safe_list((ta.cci(df['high'], df['low'], df['close']).dropna() if isinstance(ta.cci(df['high'], df['low'], df['close']), pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
-                "ATR": safe_list(atr_vals.tail(3).tolist() if not atr_vals.empty else []),
-                "KeltnerChannels": safe_dict(keltner.iloc[-1].to_dict() if not keltner.empty else None),
-                "BollingerBands": safe_dict(bb.iloc[-1].to_dict() if not bb.empty else None),
+                "RSI": series_tail_floats(ta.rsi(df['close'], length=14), 3),
+                "MACD": row_to_float_dict(ta.macd(df['close'])),
+                "WilliamsR": series_tail_floats(ta.willr(df['high'], df['low'], df['close']), 3),
+                "CCI": series_tail_floats(ta.cci(df['high'], df['low'], df['close']), 3),
+                "ATR": series_tail_floats(atr_vals if isinstance(atr_vals, pd.Series) else pd.Series(dtype='float64'), 3),
+                "KeltnerChannels": row_to_float_dict(keltner),
+                "BollingerBands": row_to_float_dict(bb),
             },
             "microMetrics": {
-                "RSI_1m": last_rsi_value_for(symbol, '1m', 14, 120, 2.0),
-                "RSI_5m": last_rsi_value_for(symbol, '5m', 14, 120, 2.0),
+                "RSI_1m": float(last_rsi_value_for(symbol, '1m', 14, 120, 2.0)),
+                "RSI_5m": float(last_rsi_value_for(symbol, '5m', 14, 120, 2.0)),
             }
         }
     except Exception as e:
@@ -436,19 +458,22 @@ def miniscalping(symbol: str = "BTCUSDT"):
 
         # Orderbook / Funding
         ob = get_orderbook(symbol, limit=20, ttl=2.0) or {"bids": [], "asks": []}
+        # Convert string bids/asks -> float pairs for iOS decoding [[Double]]
+        bids_f = [[float(p), float(q)] for p, q in ob.get('bids', [])[:10]] if ob.get('bids') else []
+        asks_f = [[float(p), float(q)] for p, q in ob.get('asks', [])[:10]] if ob.get('asks') else []
         funding = get_funding_rate_rest(symbol)
 
         # Response
         return {
             "priceData": {
-                "currentPrice": safe_float(df['close'].iloc[-1]),
-                "priceChange24h": MISSING,
-                "priceChangePercent24h": MISSING,
-                "volume24h": MISSING,
-                "high24h": safe_float(df['high'].tail(24).max() if len(df) >= 24 else df['high'].max()),
-                "low24h": safe_float(df['low'].tail(24).min() if len(df) >= 24 else df['low'].min()),
-                "volatility": safe_float((df['close'].pct_change().dropna().std() or 0.0) * np.sqrt(24 * 365)),
-                "atr": safe_float(atr.dropna().iloc[-1] if isinstance(atr, pd.Series) and not atr.dropna().empty else 0.0),
+                "currentPrice": float(df['close'].iloc[-1]),
+                "priceChange24h": None,
+                "priceChangePercent24h": None,
+                "volume24h": None,
+                "high24h": float(df['high'].tail(24).max() if len(df) >= 24 else df['high'].max()),
+                "low24h": float(df['low'].tail(24).min() if len(df) >= 24 else df['low'].min()),
+                "volatility": float((df['close'].pct_change().dropna().std() or 0.0) * np.sqrt(24 * 365)),
+                "atr": float(atr.dropna().iloc[-1] if isinstance(atr, pd.Series) and not atr.dropna().empty else 0.0),
             },
             "pivotPoints": {
                 "pivot": safe_float(pivot.iloc[-1] if not pivot.empty else 0.0),
@@ -464,11 +489,11 @@ def miniscalping(symbol: str = "BTCUSDT"):
                 "institutionalFlow": safe_float(np.random.uniform(1e7, 5e7))
             },
             "orderBook": {
-                "bids": ob.get('bids', [])[:10],
-                "asks": ob.get('asks', [])[:10],
-                "spread": (lambda a,b: safe_float(a-b))(float(ob['asks'][0][0]), float(ob['bids'][0][0])) if ob.get('asks') and ob.get('bids') else MISSING,
-                "bidVolume": safe_float(sum([float(b[1]) for b in ob.get('bids', [])[:10]])) if ob.get('bids') else MISSING,
-                "askVolume": safe_float(sum([float(a[1]) for a in ob.get('asks', [])[:10]])) if ob.get('asks') else MISSING,
+                "bids": bids_f,
+                "asks": asks_f,
+                "spread": (lambda a,b: safe_float(a-b))(asks_f[0][0], bids_f[0][0]) if asks_f and bids_f else MISSING,
+                "bidVolume": safe_float(sum([lvl[1] for lvl in bids_f])) if bids_f else MISSING,
+                "askVolume": safe_float(sum([lvl[1] for lvl in asks_f])) if asks_f else MISSING,
             },
             "fundingRate": {
                 "symbol": symbol,
@@ -489,31 +514,31 @@ def miniscalping(symbol: str = "BTCUSDT"):
                 "whaleTransactions": int(np.random.randint(20, 100))
             },
             "technicalIndicators": {
-                "RSI": safe_list((rsi.dropna() if isinstance(rsi, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
-                "MACD": safe_dict(macd_df.iloc[-1].to_dict() if isinstance(macd_df, pd.DataFrame) and not macd_df.empty else None),
-                "Stochastic": safe_dict(stoch_df.iloc[-1].to_dict() if isinstance(stoch_df, pd.DataFrame) and not stoch_df.empty else None),
-                "ATR": safe_list((atr.dropna() if isinstance(atr, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
-                "Volume": safe_list(df['volume'].tail(3).tolist()),
-                "EMA_12": safe_list((ema_12.dropna() if isinstance(ema_12, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
-                "EMA_26": safe_list((ema_26.dropna() if isinstance(ema_26, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
-                "SMA_20": safe_list((sma_20.dropna() if isinstance(sma_20, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
-                "ADX": safe_dict(adx_df.iloc[-1].to_dict() if isinstance(adx_df, pd.DataFrame) and not adx_df.empty else None),
-                "BollingerBands": safe_dict(bb_df.iloc[-1].to_dict() if isinstance(bb_df, pd.DataFrame) and not bb_df.empty else None),
-                "StochRSI": safe_dict(stochrsi_df.iloc[-1].to_dict() if isinstance(stochrsi_df, pd.DataFrame) and not stochrsi_df.empty else None),
-                "CCI": safe_list((cci.dropna() if isinstance(cci, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
-                "OBV": safe_list((obv.dropna() if isinstance(obv, pd.Series) else pd.Series(dtype='float64')).tail(3).tolist()),
-                "VWAP": safe_list(vwap.dropna().tail(3).tolist()),
+                "RSI": series_tail_floats(rsi, 3),
+                "MACD": row_to_float_dict(macd_df),
+                "Stochastic": row_to_float_dict(stoch_df),
+                "ATR": series_tail_floats(atr, 3),
+                "Volume": series_tail_floats(df['volume'], 3),
+                "EMA_12": series_tail_floats(ema_12, 3),
+                "EMA_26": series_tail_floats(ema_26, 3),
+                "SMA_20": series_tail_floats(sma_20, 3),
+                "ADX": row_to_float_dict(adx_df),
+                "BollingerBands": row_to_float_dict(bb_df),
+                "StochRSI": row_to_float_dict(stochrsi_df),
+                "CCI": series_tail_floats(cci, 3),
+                "OBV": series_tail_floats(obv, 3),
+                "VWAP": series_tail_floats(vwap, 3),
                 "PivotPoints": {
-                    "pivot": safe_float(pivot.iloc[-1] if not pivot.empty else 0.0),
-                    "resistance1": safe_float(r1.iloc[-1] if not r1.empty else 0.0),
-                    "support1": safe_float(s1.iloc[-1] if not s1.empty else 0.0),
-                    "resistance2": safe_float(r2.iloc[-1] if not r2.empty else 0.0),
-                    "support2": safe_float(s2.iloc[-1] if not s2.empty else 0.0)
+                    "pivot": float(pivot.iloc[-1] if not pivot.empty else 0.0),
+                    "resistance1": float(r1.iloc[-1] if not r1.empty else 0.0),
+                    "support1": float(s1.iloc[-1] if not s1.empty else 0.0),
+                    "resistance2": float(r2.iloc[-1] if not r2.empty else 0.0),
+                    "support2": float(s2.iloc[-1] if not s2.empty else 0.0)
                 },
             },
             "microMetrics": {
-                "RSI_1m": last_rsi_value_for(symbol, '1m', 14, 120, 2.0),
-                "RSI_5m": last_rsi_value_for(symbol, '5m', 14, 120, 2.0),
+                "RSI_1m": float(last_rsi_value_for(symbol, '1m', 14, 120, 2.0)),
+                "RSI_5m": float(last_rsi_value_for(symbol, '5m', 14, 120, 2.0)),
             }
         }
     except Exception as e:
@@ -556,18 +581,18 @@ def dailytrading(symbol: str = "BTCUSDT"):
                 "support2": safe_float(s2.iloc[-1] if not s2.empty else 0.0),
             },
             "technicalIndicators": {
-                "RSI": safe_list(rsi_values.tail(3).tolist() if not rsi_values.empty else []),
-                "MACD": safe_dict(macd_values.iloc[-1].to_dict() if not macd_values.empty else None),
-                "ADX": safe_dict(ta.adx(df['high'], df['low'], df['close']).iloc[-1].to_dict() if not ta.adx(df['high'], df['low'], df['close']).empty else None),
-                "BollingerBands": safe_dict(bb.iloc[-1].to_dict() if not bb.empty else None),
-                "ATR": safe_list(atr_values.tail(3).tolist() if not atr_values.empty else []),
-                "Volume": safe_list(df['volume'].tail(10).tolist()),
+                "RSI": series_tail_floats(rsi_values, 3),
+                "MACD": row_to_float_dict(macd_values),
+                "ADX": row_to_float_dict(ta.adx(df['high'], df['low'], df['close'])),
+                "BollingerBands": row_to_float_dict(bb),
+                "ATR": series_tail_floats(atr_values, 3),
+                "Volume": series_tail_floats(df['volume'], 10),
                 "PivotPoints": {
-                    "pivot": safe_float(pivot.iloc[-1] if not pivot.empty else 0.0),
-                    "resistance1": safe_float(r1.iloc[-1] if not r1.empty else 0.0),
-                    "support1": safe_float(s1.iloc[-1] if not s1.empty else 0.0),
-                    "resistance2": safe_float(r2.iloc[-1] if not r2.empty else 0.0),
-                    "support2": safe_float(s2.iloc[-1] if not s2.empty else 0.0),
+                    "pivot": float(pivot.iloc[-1] if not pivot.empty else 0.0),
+                    "resistance1": float(r1.iloc[-1] if not r1.empty else 0.0),
+                    "support1": float(s1.iloc[-1] if not s1.empty else 0.0),
+                    "resistance2": float(r2.iloc[-1] if not r2.empty else 0.0),
+                    "support2": float(s2.iloc[-1] if not s2.empty else 0.0),
                 },
             },
             "sentiment": {
@@ -606,11 +631,132 @@ def orderbook(symbol: str = "BTCUSDT", limit: int = 20):
             return {"error": "Orderbook alınamadı"}
         return {
             "lastUpdateId": int(datetime.utcnow().timestamp() * 1000),
-            "bids": ob.get('bids', [])[:limit],
-            "asks": ob.get('asks', [])[:limit],
-            "spread": (float(ob['asks'][0][0]) - float(ob['bids'][0][0])) if ob.get('asks') and ob.get('bids') else None,
-            "bidVolume": float(sum([float(b[1]) for b in ob.get('bids', [])[:limit]])) if ob.get('bids') else None,
-            "askVolume": float(sum([float(a[1]) for a in ob.get('asks', [])[:limit]])) if ob.get('asks') else None,
+            "bids": [[float(p), float(q)] for p, q in ob.get('bids', [])[:limit]] if ob.get('bids') else [],
+            "asks": [[float(p), float(q)] for p, q in ob.get('asks', [])[:limit]] if ob.get('asks') else [],
+            "spread": (float(ob['asks'][0][0]) - float(ob['bids'][0][0])) if ob.get('asks') and ob.get('bids') else 0.0,
+            "bidVolume": float(sum([float(b[1]) for b in ob.get('bids', [])[:limit]])) if ob.get('bids') else 0.0,
+            "askVolume": float(sum([float(a[1]) for a in ob.get('asks', [])[:limit]])) if ob.get('asks') else 0.0,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/sentiment/{symbol}")
+def sentiment(symbol: str = "BTCUSDT"):
+    try:
+        return {
+            "fearGreedIndex": int(np.random.randint(20, 80)),
+            "socialSentiment": float(np.random.uniform(-1, 1)),
+            "newsSentiment": float(np.random.uniform(-1, 1)),
+            "institutionalFlow": float(np.random.uniform(1e7, 5e7)),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/indicators_binance/{symbol}")
+def indicators_binance(symbol: str = "BTCUSDT", interval: str = "1h", limit: int = 100):
+    try:
+        df = get_ohlcv(symbol, interval, limit, ttl=2.0)
+        if df is None or df.empty:
+            return {"error": "OHLCV verisi alınamadı"}
+        for c in ["open", "high", "low", "close", "volume"]:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+
+        out = {
+            "RSI": series_tail_floats(ta.rsi(df['close'], length=14), 100),
+            "MACD": row_to_float_dict(ta.macd(df['close'])),
+            "EMA_12": series_tail_floats(ta.ema(df['close'], length=12), 100),
+            "EMA_26": series_tail_floats(ta.ema(df['close'], length=26), 100),
+            "SMA_20": series_tail_floats(ta.sma(df['close'], length=20), 100),
+            "ADX": row_to_float_dict(ta.adx(df['high'], df['low'], df['close'])),
+            "BollingerBands": row_to_float_dict(robust_bbands(df['close'])),
+            "StochRSI": row_to_float_dict(ta.stochrsi(df['close'])),
+            "CCI": series_tail_floats(ta.cci(df['high'], df['low'], df['close']), 100),
+            "ATR": series_tail_floats(ta.atr(df['high'], df['low'], df['close']), 100),
+            "OBV": series_tail_floats(ta.obv(df['close'], df['volume']), 100),
+            "VWAP": series_tail_floats(manual_vwap(df), 100),
+            "Keltner": row_to_float_dict(ta.kc(df['high'], df['low'], df['close'])),
+            "Volume": series_tail_floats(df['volume'], 100),
+        }
+        # Pivot points (single
+        pivot = (df['high'] + df['low'] + df['close']) / 3
+        r1 = (2 * pivot) - df['low']
+        s1 = (2 * pivot) - df['high']
+        r2 = pivot + (df['high'] - df['low'])
+        s2 = pivot - (df['high'] - df['low'])
+        out["PivotPoints"] = {
+            "pivot": float(pivot.iloc[-1] if not pivot.empty else 0.0),
+            "resistance1": float(r1.iloc[-1] if not r1.empty else 0.0),
+            "support1": float(s1.iloc[-1] if not s1.empty else 0.0),
+            "resistance2": float(r2.iloc[-1] if not r2.empty else 0.0),
+            "support2": float(s2.iloc[-1] if not s2.empty else 0.0),
+        }
+        return out
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/swingtrading/{symbol}")
+def swingtrading(symbol: str = "BTCUSDT"):
+    try:
+        # Use 1d data for swing context
+        df = get_ohlcv(symbol, "1d", 100, ttl=2.0)
+        if df is None or df.empty:
+            return {"error": "OHLCV verisi alınamadı"}
+        for c in ["open", "high", "low", "close", "volume"]:
+            df[c] = pd.to_numeric(df[c], errors='coerce')
+
+        pivot = (df['high'] + df['low'] + df['close']) / 3
+        r1 = (2 * pivot) - df['low']
+        s1 = (2 * pivot) - df['high']
+        r2 = pivot + (df['high'] - df['low'])
+        s2 = pivot - (df['high'] - df['low'])
+
+        rsi_values = ta.rsi(df['close'], length=14).dropna()
+        macd_values = ta.macd(df['close'])
+        bb = robust_bbands(df['close'])
+
+        return {
+            "priceData": {
+                "currentPrice": float(df['close'].iloc[-1]),
+                "high24h": float(df['high'].iloc[-1]),
+                "low24h": float(df['low'].iloc[-1]),
+                "atr": float((ta.atr(df['high'], df['low'], df['close']).dropna().iloc[-1]) if not ta.atr(df['high'], df['low'], df['close']).dropna().empty else 0.0),
+            },
+            "pivotPoints": {
+                "pivot": float(pivot.iloc[-1] if not pivot.empty else 0.0),
+                "resistance1": float(r1.iloc[-1] if not r1.empty else 0.0),
+                "support1": float(s1.iloc[-1] if not s1.empty else 0.0),
+                "resistance2": float(r2.iloc[-1] if not r2.empty else 0.0),
+                "support2": float(s2.iloc[-1] if not s2.empty else 0.0)
+            },
+            "fundamental": {
+                "marketCap": float(np.random.uniform(5e11, 1e12)),
+                "circulatingSupply": float(np.random.uniform(1.8e7, 2.1e7)),
+                "developerActivity": float(np.random.uniform(0.6, 0.9)),
+                "githubCommits": int(np.random.randint(800, 2000)),
+                "roadmapProgress": float(np.random.uniform(0.6, 0.9))
+            },
+            "macro": {
+                "fedRate": float(np.random.uniform(4.5, 6.0)),
+                "inflation": float(np.random.uniform(2.5, 4.0)),
+                "dollarIndex": float(np.random.uniform(100, 105)),
+                "goldPrice": float(np.random.uniform(1900, 2200)),
+                "oilPrice": float(np.random.uniform(70, 85))
+            },
+            "regulatory": {
+                "secStatus": "pending",
+                "euRegulation": "compliant",
+                "asiaRegulation": "partial",
+                "regulatoryRisk": float(np.random.uniform(0.1, 0.5))
+            },
+            "technicalIndicators": {
+                "RSI": series_tail_floats(rsi_values, 3),
+                "MACD": row_to_float_dict(macd_values),
+                "ADX": row_to_float_dict(ta.adx(df['high'], df['low'], df['close'])),
+                "BollingerBands": row_to_float_dict(bb)
+            }
         }
     except Exception as e:
         return {"error": str(e)}
