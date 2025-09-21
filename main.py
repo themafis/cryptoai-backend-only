@@ -337,15 +337,31 @@ def cache_key(symbol: str, interval: str, limit: int) -> str:
 
 
 def get_ohlcv(symbol: str, interval: str, limit: int = 100, ttl: float = 2.0) -> Optional[pd.DataFrame]:
-    # Prefer WS cache if available for 1m/5m, and derive 15m from 5m to reduce REST load
+    """
+    Fetch OHLCV with smart preference:
+    - Use WS cache if it is sufficiently warm (enough rows) to compute indicators.
+    - Otherwise, fallback to REST to avoid empty indicator arrays.
+    - For 15m, derive from 5m WS only if we have at least limit*3 5m rows.
+    """
+    MIN_ROWS = max(30, int(limit * 0.5))  # minimum bars required from WS to trust it
+
     if interval in ("1m", "5m"):
         rows = WS_MANAGER.get_klines(symbol, interval)
-        if rows:
+        if rows and len(rows) >= MIN_ROWS:
             df_ws = pd.DataFrame(rows[-limit:], columns=["timestamp", "open", "high", "low", "close", "volume"])
             return df_ws
+        # WS not warm enough -> try REST first
+        df = get_klines_rest(symbol, interval, limit, futures_first=True)
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            CACHE.set(cache_key(symbol, interval, limit), df, ttl)
+            return df
+        # last resort: return whatever WS has
+        if rows:
+            return pd.DataFrame(rows[-limit:], columns=["timestamp", "open", "high", "low", "close", "volume"])
+
     if interval == "15m":
         rows5 = WS_MANAGER.get_klines(symbol, "5m")
-        if rows5:
+        if rows5 and len(rows5) >= max(3 * limit, 90):  # need enough 5m bars to resample
             d5 = pd.DataFrame(rows5, columns=["timestamp", "open", "high", "low", "close", "volume"])
             d5["timestamp"] = pd.to_datetime(d5["timestamp"], unit="ms")
             d5 = d5.set_index("timestamp")
@@ -355,6 +371,11 @@ def get_ohlcv(symbol: str, interval: str, limit: int = 100, ttl: float = 2.0) ->
                 # keep standard column names for downstream TA
                 out.rename(columns={"timestamp":"open_time"}, inplace=False)
                 return out.rename(columns={"open_time":"timestamp"})
+        # Not enough WS data -> REST 15m
+        df = get_klines_rest(symbol, interval, limit, futures_first=True)
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            CACHE.set(cache_key(symbol, interval, limit), df, ttl)
+            return df
     key = cache_key(symbol, interval, limit)
     cached = CACHE.get(key)
     if isinstance(cached, pd.DataFrame):
