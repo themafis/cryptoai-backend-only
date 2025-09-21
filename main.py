@@ -1,3 +1,11 @@
+import sys
+from pathlib import Path
+
+# Ensure vendored third_party packages (e.g., pandas_ta) are importable BEFORE third-party imports
+_THIRD_PARTY = Path(__file__).resolve().parent / "third_party"
+if str(_THIRD_PARTY) not in sys.path:
+    sys.path.append(str(_THIRD_PARTY))
+
 import requests
 import pandas as pd
 import pandas_ta as ta
@@ -18,6 +26,8 @@ app = FastAPI()
 binance = ccxt.binance({
     'sandbox': False
 })
+
+ 
 
 # --- Short TTL cache & rate limit / ban-backoff for Binance calls ---
 _cache: dict = {}
