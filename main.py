@@ -292,10 +292,25 @@ def get_funding_rate_rest(symbol: str) -> Dict[str, Any]:
         return {
             "fundingRate": float(prem.get("lastFundingRate", 0.0)),
             "nextFundingTime": prem.get("nextFundingTime", 0),
-            "openInterest": prem.get("openInterest", 0)
+            "openInterest": float(prem.get("openInterest", 0) or 0),
+            # iOS decoder expects a nested 'liquidations' object. Provide safe defaults.
+            "liquidations": {
+                "longLiquidations": 0.0,
+                "shortLiquidations": 0.0,
+                "liquidationPrice": 0.0,
+            },
         }
     except Exception:
-        return {"fundingRate": 0.0001, "nextFundingTime": 0, "openInterest": 0}
+        return {
+            "fundingRate": 0.0001,
+            "nextFundingTime": 0,
+            "openInterest": 0.0,
+            "liquidations": {
+                "longLiquidations": 0.0,
+                "shortLiquidations": 0.0,
+                "liquidationPrice": 0.0,
+            },
+        }
 
 
 # -----------------------------
@@ -522,6 +537,13 @@ def build_bollinger_dict(close: pd.Series) -> Dict[str, float]:
                     out[str(k)] = float(v)
                 except Exception:
                     pass
+            # Provide compatibility aliases if library returned duplicated length tokens like 'BBU_5_5_2.0'
+            # Map 'X_5_5_2.0' -> 'X_5_2.0' and 'X_20_20_2.0' -> 'X_20_2.0'
+            for base in ("BBL", "BBM", "BBU"):
+                dup_key = f"{base}_{length}_{length}_2.0"
+                norm_key = f"{base}_{length}_2.0"
+                if dup_key in out and norm_key not in out:
+                    out[norm_key] = out[dup_key]
             # also provide generic aliases for current length (last computed)
             out.setdefault("lower", float(row.iloc[0]))
             out.setdefault("middle", float(row.iloc[1]))
