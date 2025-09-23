@@ -18,7 +18,7 @@ if str(_THIRD_PARTY) not in sys.path:
 
 import pandas_ta as ta
 import requests
-from fastapi import FastAPI
+from fastapi import FastAPI, Body
 from fastapi.responses import JSONResponse
 try:
     import websockets  # type: ignore
@@ -1104,6 +1104,35 @@ def ai_mini(symbol: str = "BTCUSDT"):
         return {"commentary": text}
     except Exception as e:
         return {"commentary": f"Veri alınamadı: {str(e)}"}
+
+@app.post("/ai/chat")
+def ai_chat(payload: dict = Body(...)):
+    """
+    Proxy endpoint to Groq Chat Completions API.
+    Expects a JSON body with fields: model, messages, temperature, max_tokens, top_p, frequency_penalty, presence_penalty.
+    Uses GROQ_API_KEY from environment variables.
+    """
+    api_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if not api_key:
+        return JSONResponse(status_code=500, content={"error": "GROQ_API_KEY not configured"})
+    try:
+        resp = SESSION.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "CryptoAI/2.0"
+            },
+            json=payload,
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return JSONResponse(status_code=resp.status_code, content={"error": resp.text})
+        data = resp.json()
+        # Return raw Groq response to the client; iOS will parse `choices[0].message.content`.
+        return data
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 if __name__ == "__main__":
