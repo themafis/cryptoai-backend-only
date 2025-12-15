@@ -940,6 +940,18 @@ class Analyzer:
         self.queue = queue
         self.broadcaster = broadcaster
         self.hooks = hooks
+        self.stdout_alerts = os.environ.get("ANALYZER_STDOUT_ALERTS", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        self.stdout_signals_only = os.environ.get("ANALYZER_STDOUT_SIGNALS_ONLY", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
         # All state is keyed by composite key "{exchange}:{symbol}" to support
         # multiple exchanges using the same analyzer pipeline.
         self.trade_windows: Dict[str, Deque[Tuple[int, float, str]]] = {}
@@ -983,7 +995,14 @@ class Analyzer:
             if symbol:
                 alert = self._maybe_emit_alert(key, symbol, exchange)
                 if alert:
-                    print(json.dumps(alert))
+                    if self.stdout_alerts:
+                        if (
+                            (not self.stdout_signals_only)
+                            or alert.get("signal")
+                            or alert.get("orderbook_wall")
+                            or (alert.get("liquidations") or {}).get("cluster_signal")
+                        ):
+                            print(json.dumps(alert), flush=True)
                     if self.broadcaster:
                         await self.broadcaster.broadcast(alert)
 

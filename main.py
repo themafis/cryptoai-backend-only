@@ -25,7 +25,7 @@ if str(_THIRD_PARTY) not in sys.path:
 
 import pandas_ta as ta
 import requests
-from fastapi import FastAPI, Body, WebSocket
+from fastapi import FastAPI, Body, WebSocket, Response
 from starlette.websockets import WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -2922,6 +2922,11 @@ def build_whale_metrics(symbol: str) -> Dict[str, Any]:
 @app.get("/")
 def root():
     return {"message": "API v2 çalışıyor!"}
+
+
+@app.head("/")
+def root_head():
+    return Response(status_code=200)
 
 
 @app.get("/debug/markets/binance")
