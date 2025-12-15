@@ -30,6 +30,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import random
 import time
 import uuid
@@ -1274,13 +1275,16 @@ async def main(hooks: Optional["AnalyzerHooks"] = None) -> None:
         mexc_trades = MexcTradeTracker(session, queue)
         analyzer = Analyzer(CONFIG, queue, broadcaster=broadcaster, hooks=hooks)
 
-        ws_server = ws_serve(
-            broadcaster.handler,
-            host="0.0.0.0",
-            port=8765,
-            ping_interval=20,
-            ping_timeout=20,
-        )
+        ws_server = None
+        ws_enabled = os.environ.get("ANALYZER_WS_ENABLED", "").strip().lower() in ("1", "true", "yes", "on")
+        if ws_enabled:
+            ws_server = ws_serve(
+                broadcaster.handler,
+                host="0.0.0.0",
+                port=8765,
+                ping_interval=20,
+                ping_timeout=20,
+            )
 
         tasks = [
             asyncio.create_task(agg.run(), name="aggTrade"),
@@ -1291,11 +1295,14 @@ async def main(hooks: Optional["AnalyzerHooks"] = None) -> None:
         ]
 
         try:
-            try:
-                async with ws_server:
+            if ws_server is not None:
+                try:
+                    async with ws_server:
+                        await asyncio.gather(*tasks)
+                except OSError as exc:
+                    logging.warning("Analyzer WS server disabled: %s", exc)
                     await asyncio.gather(*tasks)
-            except OSError as exc:
-                logging.warning("Analyzer WS server disabled: %s", exc)
+            else:
                 await asyncio.gather(*tasks)
         except asyncio.CancelledError:
             raise
