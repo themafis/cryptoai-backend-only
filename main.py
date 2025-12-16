@@ -60,6 +60,24 @@ app = FastAPI(title="CryptoAI Backend v2")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
+IS_RENDER = bool(os.environ.get("RENDER")) or bool(os.environ.get("RENDER_SERVICE_ID")) or bool(
+    os.environ.get("RENDER_SERVICE_NAME")
+)
+
+
+def _env_flag(name: str, default: str = "0") -> bool:
+    v = os.environ.get(name)
+    if v is None:
+        v = default
+    return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+WHALETRACK_ENABLED = _env_flag("WHALETRACK_ENABLED", "0" if IS_RENDER else "1")
+BACKGROUND_TASKS_ENABLED = _env_flag("BACKGROUND_TASKS_ENABLED", "0" if IS_RENDER else "1")
+BACKGROUND_STARTUP_DELAY_SEC = float(
+    os.environ.get("BACKGROUND_STARTUP_DELAY_SEC", "5" if IS_RENDER else "0") or 0
+)
+
 
 def upsert_simulator_profile(
     anon_id: str,
@@ -2391,73 +2409,84 @@ async def price_alerts_worker():
 
 @app.on_event("startup")
 async def on_startup():
-    # Start background refresher
-    asyncio.create_task(background_refresher())
-    # Start WS manager with a small preload; any new symbols will be added on demand
-    try:
-        asyncio.create_task(WS_MANAGER.run(["BTCUSDT", "ETHUSDT", "SOLUSDT"]))
-    except Exception:
-        pass
-    # Start Price Alerts worker (Binance-only, low frequency)
-    try:
-        asyncio.create_task(price_alerts_worker())
-    except Exception:
-        pass
-    async def notification_worker():
-        while True:
+    async def _start_background():
+        if not BACKGROUND_TASKS_ENABLED:
+            return
+        try:
+            if BACKGROUND_STARTUP_DELAY_SEC > 0:
+                await asyncio.sleep(BACKGROUND_STARTUP_DELAY_SEC)
+        except Exception:
+            pass
+
+        asyncio.create_task(background_refresher())
+
+        try:
+            asyncio.create_task(WS_MANAGER.run(["BTCUSDT", "ETHUSDT", "SOLUSDT"]))
+        except Exception:
+            pass
+
+        try:
+            asyncio.create_task(price_alerts_worker())
+        except Exception:
+            pass
+
+        async def notification_worker():
+            while True:
+                try:
+                    ev = await PRICE_ALERTS_EVENT_QUEUE.get()
+                    payload = {"type": "rule_triggered", "event": asdict(ev)}
+                    await PRICE_ALERTS_BROADCASTER.broadcast_json(payload)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    await asyncio.sleep(0.2)
+
+        try:
+            asyncio.create_task(notification_worker())
+        except Exception:
+            pass
+
+        if WHALETRACK_ENABLED:
             try:
-                ev = await PRICE_ALERTS_EVENT_QUEUE.get()
-                payload = {"type": "rule_triggered", "event": asdict(ev)}
-                await PRICE_ALERTS_BROADCASTER.broadcast_json(payload)
-            except asyncio.CancelledError:
-                raise
+                def _hook_on_candle_close(
+                    symbol: str,
+                    timeframe: str,
+                    ts_ms: int,
+                    price_pct_change: Optional[float],
+                    volume_pct_change: Optional[float],
+                ) -> None:
+                    try:
+                        candle = Candle(
+                            open=0.0,
+                            high=0.0,
+                            low=0.0,
+                            close=0.0,
+                            volume=0.0,
+                            open_time_ms=int(ts_ms) - 60_000,
+                            close_time_ms=int(ts_ms),
+                        )
+                        events = on_candle_close(
+                            symbol,
+                            timeframe,
+                            candle,
+                            price_pct_change=price_pct_change,
+                            volume_pct_change=volume_pct_change,
+                        )
+                        if events:
+                            for ev in events:
+                                try:
+                                    PRICE_ALERTS_EVENT_QUEUE.put_nowait(ev)
+                                except Exception:
+                                    pass
+                    except Exception as exc:
+                        print(f"[PriceAlerts] on_candle_close hook error: {exc}", flush=True)
+
+                hooks = binance_futures_analyzer.AnalyzerHooks(on_candle_close=_hook_on_candle_close)
+                asyncio.create_task(binance_futures_analyzer.main(hooks=hooks))
             except Exception:
-                await asyncio.sleep(0.2)
+                pass
 
-    try:
-        asyncio.create_task(notification_worker())
-    except Exception:
-        pass
-
-    # Start WhaleTrack analyzer (Binance+MEXC) in the same event loop
-    try:
-        def _hook_on_candle_close(
-            symbol: str,
-            timeframe: str,
-            ts_ms: int,
-            price_pct_change: Optional[float],
-            volume_pct_change: Optional[float],
-        ) -> None:
-            try:
-                candle = Candle(
-                    open=0.0,
-                    high=0.0,
-                    low=0.0,
-                    close=0.0,
-                    volume=0.0,
-                    open_time_ms=int(ts_ms) - 60_000,
-                    close_time_ms=int(ts_ms),
-                )
-                events = on_candle_close(
-                    symbol,
-                    timeframe,
-                    candle,
-                    price_pct_change=price_pct_change,
-                    volume_pct_change=volume_pct_change,
-                )
-                if events:
-                    for ev in events:
-                        try:
-                            PRICE_ALERTS_EVENT_QUEUE.put_nowait(ev)
-                        except Exception:
-                            pass
-            except Exception as exc:
-                print(f"[PriceAlerts] on_candle_close hook error: {exc}", flush=True)
-
-        hooks = binance_futures_analyzer.AnalyzerHooks(on_candle_close=_hook_on_candle_close)
-        asyncio.create_task(binance_futures_analyzer.main(hooks=hooks))
-    except Exception:
-        pass
+    asyncio.create_task(_start_background())
 
 # -----------------------------
 # Whale AI helpers
