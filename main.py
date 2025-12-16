@@ -30,6 +30,9 @@ from starlette.websockets import WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from sim_db import close_pool, init_db
+from sim_api import router as simserver_router
+
 from exchange_adapters import (
     BinanceSpotAdapter,
     MEXCAdapter,
@@ -56,6 +59,8 @@ except Exception:
     _HAS_CCXT = False
 
 app = FastAPI(title="CryptoAI Backend v2")
+
+app.include_router(simserver_router)
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -2434,6 +2439,12 @@ async def on_startup():
         except Exception:
             pass
 
+        # Best-effort DB init for simulator server; do not block startup.
+        try:
+            asyncio.create_task(init_db())
+        except Exception:
+            pass
+
         if BACKGROUND_TASKS_ENABLED:
             if BACKGROUND_REFRESHER_ENABLED:
                 try:
@@ -2535,6 +2546,14 @@ async def on_startup():
                 pass
 
     asyncio.create_task(_start_background())
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    try:
+        await close_pool()
+    except Exception:
+        pass
 
 # -----------------------------
 # Whale AI helpers
