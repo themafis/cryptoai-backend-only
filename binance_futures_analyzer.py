@@ -1005,6 +1005,11 @@ class Analyzer:
                             print(json.dumps(alert), flush=True)
                     if self.broadcaster:
                         await self.broadcaster.broadcast(alert)
+                    if self.hooks and self.hooks.on_alert:
+                        try:
+                            self.hooks.on_alert(alert)
+                        except Exception:
+                            pass
 
     def _process_trade(self, key: str, symbol: str, event: Dict[str, Any]) -> None:
         ts = event["timestamp"]
@@ -1345,4 +1350,5 @@ if __name__ == "__main__":
 class AnalyzerHooks:
     on_price_update: Optional[Callable[[str, float, float, int], None]] = None
     on_candle_close: Optional[Callable[[str, str, int, Optional[float], Optional[float]], None]] = None
+    on_alert: Optional[Callable[[Dict[str, Any]], None]] = None
 

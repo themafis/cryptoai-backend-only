@@ -230,6 +230,9 @@ class WebSocketBroadcaster:
 PRICE_ALERTS_BROADCASTER = WebSocketBroadcaster()
 PRICE_ALERTS_EVENT_QUEUE: asyncio.Queue = asyncio.Queue(maxsize=5000)
 
+WHALETRACK_BROADCASTER = WebSocketBroadcaster()
+WHALETRACK_ALERT_QUEUE: asyncio.Queue = asyncio.Queue(maxsize=5000)
+
 
 @app.websocket("/ws/price_alerts")
 async def ws_price_alerts(ws: WebSocket):
@@ -242,6 +245,19 @@ async def ws_price_alerts(ws: WebSocket):
         await PRICE_ALERTS_BROADCASTER.unregister(ws)
     except Exception:
         await PRICE_ALERTS_BROADCASTER.unregister(ws)
+
+
+@app.websocket("/ws/whaletrack")
+async def ws_whaletrack(ws: WebSocket):
+    await WHALETRACK_BROADCASTER.register(ws)
+    try:
+        await ws.send_text(json.dumps({"type": "connected", "channel": "whaletrack"}))
+        while True:
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        await WHALETRACK_BROADCASTER.unregister(ws)
+    except Exception:
+        await WHALETRACK_BROADCASTER.unregister(ws)
 
 # -----------------------------
 # Simple in-memory TTL Cache
@@ -2446,6 +2462,17 @@ async def on_startup():
         except Exception:
             pass
 
+        async def whaletrack_notification_worker():
+            while True:
+                try:
+                    alert = await WHALETRACK_ALERT_QUEUE.get()
+                    payload = {"type": "whale_alert", "event": alert}
+                    await WHALETRACK_BROADCASTER.broadcast_json(payload)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    await asyncio.sleep(0.2)
+
         if WHALETRACK_ENABLED:
             try:
                 def _hook_on_candle_close(
@@ -2481,7 +2508,21 @@ async def on_startup():
                     except Exception as exc:
                         print(f"[PriceAlerts] on_candle_close hook error: {exc}", flush=True)
 
-                hooks = binance_futures_analyzer.AnalyzerHooks(on_candle_close=_hook_on_candle_close)
+                def _hook_on_alert(alert: Dict[str, Any]) -> None:
+                    try:
+                        WHALETRACK_ALERT_QUEUE.put_nowait(alert)
+                    except Exception:
+                        pass
+
+                try:
+                    asyncio.create_task(whaletrack_notification_worker())
+                except Exception:
+                    pass
+
+                hooks = binance_futures_analyzer.AnalyzerHooks(
+                    on_candle_close=_hook_on_candle_close,
+                    on_alert=_hook_on_alert,
+                )
                 asyncio.create_task(binance_futures_analyzer.main(hooks=hooks))
             except Exception:
                 pass
