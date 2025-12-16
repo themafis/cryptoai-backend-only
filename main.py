@@ -74,6 +74,8 @@ def _env_flag(name: str, default: str = "0") -> bool:
 
 WHALETRACK_ENABLED = _env_flag("WHALETRACK_ENABLED", "0" if IS_RENDER else "1")
 BACKGROUND_TASKS_ENABLED = _env_flag("BACKGROUND_TASKS_ENABLED", "0" if IS_RENDER else "1")
+BACKGROUND_REFRESHER_ENABLED = _env_flag("BACKGROUND_REFRESHER_ENABLED", "0" if IS_RENDER else "1")
+WS_MANAGER_ENABLED = _env_flag("WS_MANAGER_ENABLED", "0" if IS_RENDER else "1")
 BACKGROUND_STARTUP_DELAY_SEC = float(
     os.environ.get("BACKGROUND_STARTUP_DELAY_SEC", "5" if IS_RENDER else "0") or 0
 )
@@ -2342,7 +2344,7 @@ async def background_refresher():
         try:
             for sym in POPULAR:
                 for itv in REFRESH_INTERVALS:
-                    _ = get_ohlcv(sym, itv, 100, ttl=2.0)
+                    _ = await asyncio.to_thread(get_ohlcv, sym, itv, 100, 2.0)
             await asyncio.sleep(1.5)
         except Exception:
             await asyncio.sleep(2.0)
@@ -2366,7 +2368,7 @@ async def price_alerts_worker():
                 await asyncio.sleep(10.0)
                 continue
 
-            tickers = get_binance_24h_tickers()
+            tickers = await asyncio.to_thread(get_binance_24h_tickers)
             if not tickers:
                 await asyncio.sleep(10.0)
                 continue
@@ -2426,25 +2428,29 @@ async def price_alerts_worker():
 @app.on_event("startup")
 async def on_startup():
     async def _start_background():
-        if not BACKGROUND_TASKS_ENABLED:
-            return
         try:
             if BACKGROUND_STARTUP_DELAY_SEC > 0:
                 await asyncio.sleep(BACKGROUND_STARTUP_DELAY_SEC)
         except Exception:
             pass
 
-        asyncio.create_task(background_refresher())
+        if BACKGROUND_TASKS_ENABLED:
+            if BACKGROUND_REFRESHER_ENABLED:
+                try:
+                    asyncio.create_task(background_refresher())
+                except Exception:
+                    pass
 
-        try:
-            asyncio.create_task(WS_MANAGER.run(["BTCUSDT", "ETHUSDT", "SOLUSDT"]))
-        except Exception:
-            pass
+            if WS_MANAGER_ENABLED:
+                try:
+                    asyncio.create_task(WS_MANAGER.run(["BTCUSDT", "ETHUSDT", "SOLUSDT"]))
+                except Exception:
+                    pass
 
-        try:
-            asyncio.create_task(price_alerts_worker())
-        except Exception:
-            pass
+            try:
+                asyncio.create_task(price_alerts_worker())
+            except Exception:
+                pass
 
         async def notification_worker():
             while True:
@@ -2457,10 +2463,11 @@ async def on_startup():
                 except Exception:
                     await asyncio.sleep(0.2)
 
-        try:
-            asyncio.create_task(notification_worker())
-        except Exception:
-            pass
+        if BACKGROUND_TASKS_ENABLED:
+            try:
+                asyncio.create_task(notification_worker())
+            except Exception:
+                pass
 
         async def whaletrack_notification_worker():
             while True:
