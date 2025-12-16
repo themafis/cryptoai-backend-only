@@ -81,6 +81,7 @@ WHALETRACK_ENABLED = _env_flag("WHALETRACK_ENABLED", "0" if IS_RENDER else "1")
 BACKGROUND_TASKS_ENABLED = _env_flag("BACKGROUND_TASKS_ENABLED", "0" if IS_RENDER else "1")
 BACKGROUND_REFRESHER_ENABLED = _env_flag("BACKGROUND_REFRESHER_ENABLED", "0" if IS_RENDER else "1")
 WS_MANAGER_ENABLED = _env_flag("WS_MANAGER_ENABLED", "0" if IS_RENDER else "1")
+SIM_WORKER_IN_API = _env_flag("SIM_WORKER_IN_API", "0")
 BACKGROUND_STARTUP_DELAY_SEC = float(
     os.environ.get("BACKGROUND_STARTUP_DELAY_SEC", "5" if IS_RENDER else "0") or 0
 )
@@ -2439,11 +2440,18 @@ async def on_startup():
         except Exception:
             pass
 
-        # Best-effort DB init for simulator server; do not block startup.
         try:
             asyncio.create_task(init_db())
         except Exception:
             pass
+
+        if SIM_WORKER_IN_API:
+            try:
+                import sim_worker
+
+                asyncio.create_task(sim_worker.main())
+            except Exception:
+                pass
 
         if BACKGROUND_TASKS_ENABLED:
             if BACKGROUND_REFRESHER_ENABLED:
