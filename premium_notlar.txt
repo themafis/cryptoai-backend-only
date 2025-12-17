@@ -1,0 +1,17 @@
+Premium Notlar (WhaleTrack / Render)
+
+- WhaleTrack tarafında Binance Futures analyzer, orderbook (depth@100ms), aggTrade, liquidation tracker ve MEXC trade tracker altyapısı mevcut.
+- Render Free plan (özellikle 512MB) üzerinde bu gerçek-zamanlı websocket stream’leri ve yüksek frekanslı orderbook takibi CPU/RAM tüketimini arttırıp health-check timeout (502) ve restart sorunlarına neden olabiliyor.
+- Bu yüzden Free plan’da stabilite için WhaleTrack’in bazı ağır parçaları kısıtlı/kapalı çalıştırılıyor.
+
+İleride Render Pro (veya daha güçlü bir host) alınca yapılacaklar:
+
+- WhaleTrack’i tam kapasite aç:
+  - Daha fazla sembol subscribe et (ANALYZER_SYMBOLS listesini genişlet)
+  - MEXC tracker’ı aktif et (ANALYZER_MEXC_ENABLED=1)
+  - Gerekirse Analyzer WS server’ı aktif et (ANALYZER_WS_ENABLED=1)
+- WhaleTrack’i web API’dan ayırıp ayrı worker/servis olarak koştur (önerilir):
+  - Web API stabil kalır
+  - WhaleTrack crash/yoğunluk web’i etkilemez
+
+Not: Bu dosya sadece ürün/ops notları içindir. Üretim geçişinde env değişkenleri ve servis ayrıştırması yapılacaktır.

@@ -95,7 +95,34 @@ DEFAULT_USDT_SYMBOLS: List[str] = [
 ]
 
 
+def _is_render_env() -> bool:
+    return bool(os.environ.get("RENDER") or os.environ.get("RENDER_SERVICE_ID") or os.environ.get("RENDER_SERVICE_NAME"))
+
+
+def _env_symbols() -> Optional[list[str]]:
+    raw = (os.environ.get("ANALYZER_SYMBOLS") or "").strip()
+    if not raw:
+        return None
+    parts: list[str] = []
+    for chunk in raw.replace(";", ",").split(","):
+        s = chunk.strip().upper()
+        if s:
+            parts.append(s)
+    return parts or None
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    v = os.environ.get(name)
+    if v is None:
+        return default
+    return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _default_symbol_list() -> Dict[str, "SymbolConfig"]:
+    symbols = _env_symbols()
+    if symbols is None and _is_render_env():
+        symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+
     base: Dict[str, SymbolConfig] = {
         # BTC: biraz daha agresif eşikler
         "BTCUSDT": SymbolConfig(
@@ -113,7 +140,7 @@ def _default_symbol_list() -> Dict[str, "SymbolConfig"]:
     }
 
     # Diğer semboller için default SymbolConfig kullan.
-    for sym in DEFAULT_USDT_SYMBOLS:
+    for sym in (symbols or DEFAULT_USDT_SYMBOLS):
         base.setdefault(sym, SymbolConfig())
 
     return base
@@ -1296,7 +1323,8 @@ async def main(hooks: Optional["AnalyzerHooks"] = None) -> None:
         agg = AggTradeTracker(CONFIG, session, queue)
         depth = OrderBookTracker(CONFIG, session, queue)
         liq = LiquidationTracker(CONFIG, queue)
-        mexc_trades = MexcTradeTracker(session, queue)
+        mexc_enabled = _env_bool("ANALYZER_MEXC_ENABLED", default=not _is_render_env())
+        mexc_trades = MexcTradeTracker(session, queue) if mexc_enabled else None
         analyzer = Analyzer(CONFIG, queue, broadcaster=broadcaster, hooks=hooks)
 
         ws_server = None
@@ -1314,9 +1342,10 @@ async def main(hooks: Optional["AnalyzerHooks"] = None) -> None:
             asyncio.create_task(agg.run(), name="aggTrade"),
             asyncio.create_task(depth.run(), name="depth"),
             asyncio.create_task(liq.run(), name="liquidation"),
-            asyncio.create_task(mexc_trades.run(), name="mexc_trades"),
             asyncio.create_task(analyzer.run(), name="analyzer"),
         ]
+        if mexc_trades is not None:
+            tasks.append(asyncio.create_task(mexc_trades.run(), name="mexc_trades"))
 
         try:
             if ws_server is not None:
