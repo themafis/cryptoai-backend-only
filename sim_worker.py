@@ -6,6 +6,8 @@ from typing import Any, Dict, Optional, Tuple
 import aiohttp
 import asyncio
 
+from asyncpg.types import Json
+
 from sim_db import get_pool, init_db
 
 
@@ -136,6 +138,7 @@ async def close_position_if_triggered(conn, *, pos: Dict[str, Any], price: float
     entry = float(row["entry_price"])
     qty = float(row["qty"])
     margin = float(row["margin_usd"])
+    symbol = str(row["symbol"]).upper()
     side = str(row["side"]).lower()
 
     pnl = pnl_for_close(side=side, entry=entry, price=price, qty=qty)
@@ -181,7 +184,17 @@ async def close_position_if_triggered(conn, *, pos: Dict[str, Any], price: float
         anon_id,
         pos_id,
         "position_closed",
-        {"close_price": float(price), "pnl": float(pnl), "reason": str(reason), "credit": float(credit)},
+        Json(
+            {
+                "symbol": symbol,
+                "side": side,
+                "close_price": float(price),
+                "pnl": float(pnl),
+                "reason": str(reason),
+                "credit": float(credit),
+                "ts_ms": int(time.time() * 1000),
+            }
+        ),
     )
 
     return True

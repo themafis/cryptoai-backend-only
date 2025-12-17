@@ -5,7 +5,7 @@ services:
     rootDir: .
     plan: free
     autoDeploy: true
-    healthCheckPath: /
+    healthCheckPath: /simserver/health
     buildCommand: |
       python3.11 --version || python3 --version || python --version
       pip install --upgrade pip --no-cache-dir --retries 3 --timeout 60
@@ -29,3 +29,37 @@ services:
         value: "1"
       - key: UVICORN_LOG_LEVEL
         value: info
+
+      - key: SIM_SERVER_ENABLED
+        value: "1"
+
+  - type: worker
+    name: cryptoai-sim-worker
+    env: python
+    rootDir: .
+    plan: free
+    autoDeploy: true
+    buildCommand: |
+      python3.11 --version || python3 --version || python --version
+      pip install --upgrade pip --no-cache-dir --retries 3 --timeout 60
+      pip cache purge || true
+      pip install --only-binary=all --no-cache-dir --retries 3 --timeout 60 -r requirements.txt
+    startCommand: python -u sim_worker.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: PIP_DISABLE_PIP_VERSION_CHECK
+        value: "1"
+      - key: PIP_ONLY_BINARY
+        value: ":all:"
+      - key: PIP_RETRIES
+        value: "3"
+      - key: PIP_TIMEOUT
+        value: "60"
+
+      - key: SIM_WORKER_ENABLED
+        value: "1"
+      - key: SIM_WORKER_INTERVAL_MS
+        value: "1000"
