@@ -1,12 +1,11 @@
 import os
 import time
 import uuid
+import json
 from typing import Any, Dict, Optional, Tuple
 
 import aiohttp
 import asyncio
-
-from asyncpg.types import Json
 
 from sim_db import get_pool, init_db
 
@@ -179,12 +178,12 @@ async def close_position_if_triggered(conn, *, pos: Dict[str, Any], price: float
     )
 
     await conn.execute(
-        "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5)",
+        "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5::jsonb)",
         uuid.uuid4(),
         anon_id,
         pos_id,
         "position_closed",
-        Json(
+        json.dumps(
             {
                 "symbol": symbol,
                 "side": side,
@@ -193,7 +192,8 @@ async def close_position_if_triggered(conn, *, pos: Dict[str, Any], price: float
                 "reason": str(reason),
                 "credit": float(credit),
                 "ts_ms": int(time.time() * 1000),
-            }
+            },
+            ensure_ascii=False,
         ),
     )
 

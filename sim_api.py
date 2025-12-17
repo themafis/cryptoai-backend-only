@@ -2,10 +2,10 @@ import os
 import uuid
 import time
 import datetime
+import json
 from typing import Any, Dict, List, Optional
 
 import aiohttp
-from asyncpg.types import Json
 from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -313,12 +313,15 @@ async def open_position(payload: OpenPositionIn = Body(...)):
             )
 
             await conn.execute(
-                "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5)",
+                "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5::jsonb)",
                 uuid.uuid4(),
                 anon,
                 pid,
                 "position_opened",
-                Json({"symbol": symbol, "side": side, "entry_price": float(entry), "margin_usd": margin, "leverage": leverage}),
+                json.dumps(
+                    {"symbol": symbol, "side": side, "entry_price": float(entry), "margin_usd": margin, "leverage": leverage},
+                    ensure_ascii=False,
+                ),
             )
 
     return {"ok": True, "position_id": str(pid), "entry_price": float(entry), "liq_price": float(liq)}
@@ -361,12 +364,12 @@ async def update_risk(payload: UpdateRiskIn = Body(...)):
             )
 
             await conn.execute(
-                "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5)",
+                "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5::jsonb)",
                 uuid.uuid4(),
                 anon,
                 pid,
                 "risk_updated",
-                Json({"tp_price": payload.tp_price, "sl_price": payload.sl_price}),
+                json.dumps({"tp_price": payload.tp_price, "sl_price": payload.sl_price}, ensure_ascii=False),
             )
 
     return {"ok": True}
@@ -489,24 +492,25 @@ async def close_position_partial(payload: ClosePositionPartialIn = Body(...)):
                      "manual_close",
                  )
                  await conn.execute(
-                     "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5)",
-                     uuid.uuid4(),
-                     anon,
-                     pid,
-                     "position_closed",
-                     Json(
-                         {
-                             "symbol": symbol,
-                             "side": side,
-                             "close_price": float(price),
-                             "pnl": float(pnl),
-                             "credit": float(credit),
-                             "reason": "manual_close",
-                             "fraction": float(eff_fraction),
-                             "ts_ms": ts_ms,
-                         }
-                     ),
-                 )
+                    "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5::jsonb)",
+                    uuid.uuid4(),
+                    anon,
+                    pid,
+                    "position_closed",
+                    json.dumps(
+                        {
+                            "symbol": symbol,
+                            "side": side,
+                            "close_price": float(price),
+                            "pnl": float(pnl),
+                            "credit": float(credit),
+                            "reason": "manual_close",
+                            "fraction": float(eff_fraction),
+                            "ts_ms": ts_ms,
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
                  return {"ok": True, "closed": True, "close_price": float(price), "pnl": float(pnl)}
 
              await conn.execute(
@@ -517,25 +521,26 @@ async def close_position_partial(payload: ClosePositionPartialIn = Body(...)):
                  float(remaining_margin),
              )
              await conn.execute(
-                 "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5)",
-                 uuid.uuid4(),
-                 anon,
-                 pid,
-                 "position_partially_closed",
-                 Json(
-                     {
-                         "symbol": symbol,
-                         "side": side,
-                         "close_price": float(price),
-                         "pnl": float(pnl),
-                         "credit": float(credit),
-                         "fraction": float(eff_fraction),
-                         "remaining_qty": float(remaining_qty),
-                         "remaining_margin_usd": float(remaining_margin),
-                         "ts_ms": ts_ms,
-                     }
-                 ),
-             )
+                "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5::jsonb)",
+                uuid.uuid4(),
+                anon,
+                pid,
+                "position_partially_closed",
+                json.dumps(
+                    {
+                        "symbol": symbol,
+                        "side": side,
+                        "close_price": float(price),
+                        "pnl": float(pnl),
+                        "credit": float(credit),
+                        "fraction": float(eff_fraction),
+                        "remaining_qty": float(remaining_qty),
+                        "remaining_margin_usd": float(remaining_margin),
+                        "ts_ms": ts_ms,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
 
      return {"ok": True, "closed": False, "close_price": float(price), "pnl": float(pnl)}
 
@@ -608,12 +613,12 @@ async def close_position(payload: ClosePositionIn = Body(...)):
             )
 
             await conn.execute(
-                "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5)",
+                "INSERT INTO sim_events(id, anon_id, position_id, type, payload) VALUES ($1,$2,$3,$4,$5::jsonb)",
                 uuid.uuid4(),
                 anon,
                 pid,
                 "position_closed",
-                Json(
+                json.dumps(
                     {
                         "symbol": str(pos["symbol"]),
                         "side": side,
@@ -621,7 +626,8 @@ async def close_position(payload: ClosePositionIn = Body(...)):
                         "pnl": float(pnl),
                         "reason": "manual_close",
                         "ts_ms": int(time.time() * 1000),
-                    }
+                    },
+                    ensure_ascii=False,
                 ),
             )
 
