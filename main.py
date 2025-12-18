@@ -160,6 +160,58 @@ def upsert_simulator_profile(
         return
 
 
+def _dedupe_simulator_profiles(rows: Any) -> List[Dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        aid = str(r.get("anon_id") or "").strip()
+        if not aid:
+            continue
+
+        eq_raw = r.get("equity")
+        try:
+            eq = float(eq_raw) if eq_raw is not None else 0.0
+        except Exception:
+            eq = 0.0
+
+        existing = by_id.get(aid)
+        if existing is None:
+            by_id[aid] = r
+            continue
+
+        ex_raw = existing.get("equity")
+        try:
+            ex_eq = float(ex_raw) if ex_raw is not None else 0.0
+        except Exception:
+            ex_eq = 0.0
+
+        if eq > ex_eq:
+            by_id[aid] = r
+            continue
+
+        if eq == ex_eq:
+            n1 = str(existing.get("nickname") or "").strip()
+            n2 = str(r.get("nickname") or "").strip()
+            if not n1 and n2:
+                by_id[aid] = r
+
+    out = list(by_id.values())
+
+    def _key(x: Dict[str, Any]) -> tuple:
+        raw = x.get("equity")
+        try:
+            eqv = float(raw) if raw is not None else 0.0
+        except Exception:
+            eqv = 0.0
+        return (-eqv, str(x.get("anon_id") or ""))
+
+    out.sort(key=_key)
+    return out
+
+
 def log_simulator_topup(anon_id: str, pack_usdt: int, amount_try: float, apple_transaction_id: Optional[str]) -> None:
     """Best-effort insert into simulator_topups table in Supabase.
 
@@ -186,14 +238,16 @@ def log_simulator_topup(anon_id: str, pack_usdt: int, amount_try: float, apple_t
         if apple_transaction_id:
             payload["apple_transaction_id"] = str(apple_transaction_id)
 
-        print("[SIM] Supabase topup insert anon_id=", anon_id, "pack_usdt=", pack_usdt, "amount_try=", amount_try)
+        print(f"[SIM] Supabase topup insert anon_id={anon_id} pack_usdt={pack_usdt} amount_try={amount_try}")
         resp = requests.post(
             url,
             json=payload,
             headers=headers,
             timeout=5,
         )
-        print("[SIM] Supabase topup status=", resp.status_code, "body=", resp.text[:200])
+        print(f"[SIM] Supabase topup status={resp.status_code} body={resp.text[:200]}")
+        if not (200 <= resp.status_code < 300):
+            print(f"[SIM] Supabase topup FAILED: {resp.text}")
     except Exception:
         return
 
@@ -1452,8 +1506,40 @@ def simulator_topup_verify(payload: Dict[str, Any] = Body(...)):
             apple_transaction_id=payload.get("apple_transaction_id"),
         )
         return {"status": "ok"}
-    except Exception:
+    except Exception as e:
+        print(f"[SIM] topup verify exception: {e}")
         return JSONResponse({"status": "error", "reason": "internal"}, status_code=500)
+
+
+@app.get("/simulator/topups")
+def simulator_topups_list(limit: int = 20):
+    """Debug endpoint to check if topups are being written to Supabase."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return {"items": [], "error": "supabase_not_configured"}
+    lim = max(1, min(100, int(limit or 20)))
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/simulator_topups"
+        headers = {
+            "apikey": SUPABASE_SERVICE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+            "Content-Type": "application/json",
+        }
+        resp = requests.get(
+            url,
+            params={
+                "select": "*",
+                "order": "created_at.desc",
+                "limit": lim,
+            },
+            headers=headers,
+            timeout=5,
+        )
+        if not (200 <= resp.status_code < 300):
+            return {"items": [], "error": f"supabase_error_{resp.status_code}"}
+        rows = resp.json() if resp.text else []
+        return {"items": rows}
+    except Exception as e:
+        return {"items": [], "error": str(e)}
 
 
 @app.post("/simulator/profile")
@@ -1527,12 +1613,13 @@ def simulator_leaderboard_top(limit: int = 10):
             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
             "Content-Type": "application/json",
         }
+        fetch_lim = min(1000, max(lim * 20, 200))
         resp = requests.get(
             url,
             params={
                 "select": "anon_id,nickname,equity,successful_trades,roe",
                 "order": "equity.desc.nullslast",
-                "limit": lim,
+                "limit": fetch_lim,
             },
             headers=headers,
             timeout=5,
@@ -1543,7 +1630,7 @@ def simulator_leaderboard_top(limit: int = 10):
                 params={
                     "select": "anon_id,nickname,equity",
                     "order": "equity.desc.nullslast",
-                    "limit": lim,
+                    "limit": fetch_lim,
                 },
                 headers=headers,
                 timeout=5,
@@ -1551,7 +1638,8 @@ def simulator_leaderboard_top(limit: int = 10):
         if not (200 <= resp.status_code < 300):
             return {"items": []}
         rows = resp.json() if resp.text else []
-        return {"items": rows}
+        unique = _dedupe_simulator_profiles(rows)
+        return {"items": unique[:lim]}
     except Exception:
         return {"items": []}
 
@@ -1592,7 +1680,8 @@ def simulator_leaderboard_slice(limit: int = 400):
         if not (200 <= resp.status_code < 300):
             return {"items": []}
         rows = resp.json() if resp.text else []
-        return {"items": rows}
+        unique = _dedupe_simulator_profiles(rows)
+        return {"items": unique[:lim]}
     except Exception:
         return {"items": []}
 
@@ -1613,6 +1702,26 @@ def simulator_leaderboard_me(anon_id: str = ""):
             "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
             "Content-Type": "application/json",
         }
+
+        slice_resp = requests.get(
+            base_url,
+            params={
+                "select": "anon_id,nickname,equity,successful_trades,roe",
+                "order": "equity.desc.nullslast",
+                "limit": 1000,
+            },
+            headers=headers,
+            timeout=5,
+        )
+        if 200 <= slice_resp.status_code < 300:
+            all_rows = slice_resp.json() if slice_resp.text else []
+            unique = _dedupe_simulator_profiles(all_rows)
+            idx = next((i for i, r in enumerate(unique) if str(r.get("anon_id") or "").strip() == anon), None)
+            if idx is not None:
+                row = unique[idx]
+                result = {"found": True, "rank": idx + 1}
+                result.update(row)
+                return result
 
         me_resp = requests.get(
             base_url,
@@ -1642,36 +1751,7 @@ def simulator_leaderboard_me(anon_id: str = ""):
         if not rows:
             return {"found": False, "rank": None}
         me = rows[0]
-        equity = me.get("equity")
-        try:
-            equity_f = float(equity) if equity is not None else 0.0
-        except Exception:
-            equity_f = 0.0
-
-        count_headers = dict(headers)
-        count_headers["Prefer"] = "count=exact"
-        count_headers["Range"] = "0-0"
-
-        count_resp = requests.get(
-            base_url,
-            params={
-                "select": "anon_id",
-                "equity": f"gt.{equity_f}",
-            },
-            headers=count_headers,
-            timeout=5,
-        )
-        rank = None
-        if 200 <= count_resp.status_code < 300:
-            cr = count_resp.headers.get("content-range") or count_resp.headers.get("Content-Range")
-            if cr and "/" in cr:
-                try:
-                    total = int(cr.split("/")[-1])
-                    rank = total + 1
-                except Exception:
-                    rank = None
-
-        result = {"found": True, "rank": rank}
+        result = {"found": True, "rank": None}
         result.update(me)
         return result
     except Exception:

@@ -56,6 +56,13 @@ async def init_db() -> None:
               updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
 
+            ALTER TABLE sim_accounts
+              ADD COLUMN IF NOT EXISTS spot_balance_usd DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+            UPDATE sim_accounts
+            SET spot_balance_usd=0
+            WHERE spot_balance_usd IS NULL;
+
             CREATE TABLE IF NOT EXISTS sim_positions (
               id UUID PRIMARY KEY,
               anon_id TEXT NOT NULL REFERENCES sim_accounts(anon_id) ON DELETE CASCADE,
@@ -74,6 +81,18 @@ async def init_db() -> None:
               close_price DOUBLE PRECISION,
               close_reason TEXT
             );
+
+            ALTER TABLE sim_positions
+              ADD COLUMN IF NOT EXISTS margin_mode TEXT NOT NULL DEFAULT 'isolated';
+
+            ALTER TABLE sim_positions
+              ADD COLUMN IF NOT EXISTS entry_fee_usd DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+            ALTER TABLE sim_positions
+              ADD COLUMN IF NOT EXISTS entry_fee_rate DOUBLE PRECISION NOT NULL DEFAULT 0;
+
+            ALTER TABLE sim_positions
+              ADD COLUMN IF NOT EXISTS use_maker_fee BOOLEAN NOT NULL DEFAULT FALSE;
 
             CREATE INDEX IF NOT EXISTS sim_positions_open_idx ON sim_positions(is_open);
             CREATE INDEX IF NOT EXISTS sim_positions_anon_open_idx ON sim_positions(anon_id, is_open);
